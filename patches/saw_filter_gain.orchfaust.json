@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "Saw Filter Gain",
+  "nodes": [
+    {
+      "id": "osc1",
+      "type": "saw",
+      "params": {
+        "freq": 440.0
+      }
+    },
+    {
+      "id": "filter1",
+      "type": "lowpass",
+      "params": {
+        "cutoff": 2000.0
+      }
+    },
+    {
+      "id": "gain1",
+      "type": "gain",
+      "params": {
+        "gain": 0.25
+      }
+    }
+  ],
+  "connections": [
+    {
+      "source": "osc1",
+      "target": "filter1"
+    },
+    {
+      "source": "filter1",
+      "target": "gain1"
+    }
+  ],
+  "output": "gain1"
+}

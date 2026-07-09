@@ -1,0 +1,65 @@
+# CMake / Build folders
+build/
+bin/
+intermediate/
+x64/
+x86/
+ARM/
+ARM64/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.db
+*.opendb
+
+# Build Configurations
+Debug/
+Release/
+MinSizeRel/
+RelWithDebInfo/
+
+# Compiled files & symbols
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.ipch
+*.sdf
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+*.applocal.log
+
+# Package managers
+vcpkg_installed/
+packages/
+
+# Logs & temp files
+*.log
+*.err
+*.txt_err
+*.stdout.txt
+*.stderr.txt
+bridge_vst_test_build.log
+bridge_vst_test_output.txt
+bridge_vst_test_output.txt_err
+
+# Mac Specific
+.DS_Store
+
+# Third party SDKs and precompiled libraries
+third_party/
+
+# Installer Output
+installer/Output/

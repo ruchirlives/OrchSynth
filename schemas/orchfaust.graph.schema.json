@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OrchFaustGraph",
+  "type": "OBJECT",
+  "properties": {
+    "version": {
+      "type": "INTEGER",
+      "minimum": 1
+    },
+    "name": {
+      "type": "STRING"
+    },
+    "nodes": {
+      "type": "ARRAY",
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "id": {
+            "type": "STRING"
+          },
+          "type": {
+            "type": "STRING",
+            "enum": [
+              "sine", "saw", "square", "noise", "gain", "lowpass", "highpass", "delay",
+              "adsr", "lfo", "mixer", "reverb", "karplus_string", "modal_resonator", "body_resonator"
+            ]
+          },
+          "params": {
+            "type": "OBJECT",
+            "additionalProperties": {
+              "type": "NUMBER"
+            }
+          }
+        },
+        "required": ["id", "type"]
+      }
+    },
+    "connections": {
+      "type": "ARRAY",
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "source": {
+            "type": "STRING"
+          },
+          "target": {
+            "type": "STRING"
+          }
+        },
+        "required": ["source", "target"]
+      }
+    },
+    "output": {
+      "type": "STRING"
+    }
+  },
+  "required": ["version", "nodes", "connections", "output"]
+}

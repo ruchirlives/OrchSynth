@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "name": "Pluck String Body",
+  "nodes": [
+    {
+      "id": "noise1",
+      "type": "noise",
+      "params": {}
+    },
+    {
+      "id": "adsr1",
+      "type": "adsr",
+      "params": {
+        "attack": 0.001,
+        "decay": 0.1,
+        "sustain": 0.0,
+        "release": 0.1
+      }
+    },
+    {
+      "id": "burst_gate",
+      "type": "gain",
+      "params": {
+        "gain": 1.0
+      }
+    },
+    {
+      "id": "string1",
+      "type": "karplus_string",
+      "params": {
+        "freq": 220.0,
+        "damping": 4.0
+      }
+    },
+    {
+      "id": "body1",
+      "type": "body_resonator",
+      "params": {
+        "size": 0.5,
+        "brightness": 0.5
+      }
+    },
+    {
+      "id": "gain1",
+      "type": "gain",
+      "params": {
+        "gain": 0.5
+      }
+    }
+  ],
+  "connections": [
+    {
+      "source": "noise1",
+      "target": "burst_gate"
+    },
+    {
+      "source": "adsr1",
+      "target": "burst_gate"
+    },
+    {
+      "source": "burst_gate",
+      "target": "string1"
+    },
+    {
+      "source": "string1",
+      "target": "body1"
+    },
+    {
+      "source": "body1",
+      "target": "gain1"
+    }
+  ],
+  "output": "gain1"
+}
