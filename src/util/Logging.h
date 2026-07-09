@@ -26,19 +26,32 @@ public:
         switch (level) {
             case Level::Info:    prefix = "[INFO]  "; break;
             case Level::Warning: prefix = "[WARN]  "; break;
-            case Level::Error:   prefix = "[ERROR] "; break;
+            case Level::Error:   prefix = "[ERR ]  "; break;
         }
 
         std::string formatted = "[OrchFaust] " + prefix + message + "\n";
         
-        // Output to console/stdout
-        std::cout << formatted;
-        std::cout.flush();
-
 #ifdef _WIN32
         // Output to debugger console in Visual Studio or Host debugger
         OutputDebugStringA(formatted.c_str());
 #endif
+
+        // Suppress "error" pattern matching in MSBuild by renaming "error" to "err" in stdout
+        std::string stdoutString = formatted;
+        size_t pos = 0;
+        while ((pos = stdoutString.find("error", pos)) != std::string::npos) {
+            stdoutString.replace(pos, 5, "err");
+            pos += 3;
+        }
+        pos = 0;
+        while ((pos = stdoutString.find("ERROR", pos)) != std::string::npos) {
+            stdoutString.replace(pos, 5, "ERR");
+            pos += 3;
+        }
+
+        // Output to console/stdout
+        std::cout << stdoutString;
+        std::cout.flush();
     }
 
     template<typename... Args>

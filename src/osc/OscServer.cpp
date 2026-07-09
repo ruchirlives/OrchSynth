@@ -1,11 +1,14 @@
 #include "OscServer.h"
 #include "util/Logging.h"
+#include "osc/OscOutboundPacketStream.h"
 #include <iostream>
+#include <cstring>
 
 namespace OrchFaust {
 
 OscServer::OscServer(OscCommandQueue& queue)
-    : commandQueue(queue), running(false), shouldStop(false), portNum(9020) {}
+    : commandQueue(queue), running(false), shouldStop(false), portNum(9020),
+      replyHost("127.0.0.1"), replyPort(0) {}
 
 OscServer::~OscServer() {
     stop();
@@ -52,20 +55,75 @@ void OscServer::stop() {
 }
 
 void OscServer::run() {
-    Logger::logInfo("OSC Server starting on port ", portNum, "...");
-    try {
-        socket = std::make_unique<UdpListeningReceiveSocket>(
-            IpEndpointName(IpEndpointName::ANY_ADDRESS, portNum),
-            this
-        );
-        
+    int currentPort = portNum;
+    bool bound = false;
+    
+    while (!bound && currentPort <= 9029) {
+        try {
+            Logger::logInfo("OSC Server trying port ", currentPort, "...");
+            socket = std::make_unique<UdpListeningReceiveSocket>(
+                IpEndpointName(IpEndpointName::ANY_ADDRESS, currentPort),
+                this
+            );
+            portNum = currentPort; // update to the successfully bound port
+            bound = true;
+        } catch (const std::exception& e) {
+            Logger::logWarning("OSC Server port ", currentPort, " binding failed: ", e.what());
+            currentPort++;
+        }
+    }
+    
+    if (bound) {
+        Logger::logInfo("OSC Server successfully bound to port ", portNum);
         running.store(true);
         socket->Run();
-    } catch (const std::exception& e) {
-        Logger::logWarning("OSC Server socket error: ", e.what());
+    } else {
+        Logger::logError("OSC Server failed to bind to any port in the range 9020-9029.");
     }
     
     running.store(false);
+}
+
+void OscServer::setReplyTarget(const std::string& host, int port) {
+    std::lock_guard<std::mutex> lock(replyMutex);
+    replyHost = host.empty() ? "127.0.0.1" : host;
+    replyPort = port;
+}
+
+void OscServer::sendEvent(const std::string& type,
+                          const std::string& value1,
+                          const std::string& value2,
+                          float numeric1,
+                          float numeric2) {
+    std::string host;
+    int targetPort = 0;
+    {
+        std::lock_guard<std::mutex> lock(replyMutex);
+        host = replyHost;
+        targetPort = replyPort;
+    }
+
+    if (targetPort <= 0) {
+        return;
+    }
+
+    try {
+        UdpTransmitSocket transmitSocket(IpEndpointName(host.c_str(), targetPort));
+        char buffer[2048];
+        osc::OutboundPacketStream p(buffer, sizeof(buffer));
+        p << osc::BeginMessage("/orch_faust/event")
+          << portNum
+          << type.c_str()
+          << value1.c_str()
+          << value2.c_str()
+          << numeric1
+          << numeric2
+          << osc::EndMessage;
+
+        transmitSocket.Send(p.Data(), p.Size());
+    } catch (const std::exception& e) {
+        Logger::logError("OSC: Failed to send editor event: ", e.what());
+    }
 }
 
 void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointName& remoteEndpoint) {
@@ -79,12 +137,14 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
                 OscCommand cmd{CommandType::LoadGraph, jsonStr, "", 0.0f, 0.0f};
                 commandQueue.push(cmd);
                 Logger::logInfo("OSC: Enqueued load_graph command");
+                sendEvent("graph_loaded", "", "", static_cast<float>(jsonStr.size()), 0.0f);
             }
         }
         else if (address == "/orch_faust/compile") {
             OscCommand cmd{CommandType::Compile, "", "", 0.0f, 0.0f};
             commandQueue.push(cmd);
             Logger::logInfo("OSC: Enqueued compile command");
+            sendEvent("compile_requested");
         }
         else if (address == "/orch_faust/set_param") {
             auto arg = m.ArgumentsBegin();
@@ -102,6 +162,7 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
                         
                         OscCommand cmd{CommandType::SetParam, nodeId, param, val, 0.0f};
                         commandQueue.push(cmd);
+                        sendEvent("param_changed", nodeId, param, val, 0.0f);
                     }
                 }
             }
@@ -125,6 +186,7 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
             
             OscCommand cmd{CommandType::NoteOn, "", "", pitch, velocity};
             commandQueue.push(cmd);
+            sendEvent("note_on", "", "", pitch, velocity);
         }
         else if (address == "/orch_faust/note_off") {
             auto arg = m.ArgumentsBegin();
@@ -137,15 +199,57 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
             
             OscCommand cmd{CommandType::NoteOff, "", "", pitch, 0.0f};
             commandQueue.push(cmd);
+            sendEvent("note_off", "", "", pitch, 0.0f);
         }
         else if (address == "/orch_faust/all_notes_off") {
             OscCommand cmd{CommandType::AllNotesOff, "", "", 0.0f, 0.0f};
             commandQueue.push(cmd);
             Logger::logInfo("OSC: Enqueued all_notes_off command");
+            sendEvent("all_notes_off");
         }
         else if (address == "/orch_faust/status") {
             OscCommand cmd{CommandType::Status, "", "", 0.0f, 0.0f};
             commandQueue.push(cmd);
+        }
+        else if (address == "/orch_faust/ping") {
+            Logger::logInfo("OSC: Received ping from ", remoteEndpoint.address, ":", remoteEndpoint.port);
+            char ip[IpEndpointName::ADDRESS_STRING_LENGTH];
+            remoteEndpoint.AddressAsString(ip);
+            
+            try {
+                UdpTransmitSocket transmitSocket(IpEndpointName(ip, remoteEndpoint.port));
+                
+                char buffer[1024];
+                osc::OutboundPacketStream p(buffer, sizeof(buffer));
+                p << osc::BeginMessage("/orch_faust/pong")
+                  << "Orch Synth"
+                  << portNum
+                  << osc::EndMessage;
+                  
+                transmitSocket.Send(p.Data(), p.Size());
+                Logger::logInfo("OSC: Sent pong reply to ", ip, ":", remoteEndpoint.port);
+            } catch (const std::exception& e) {
+                Logger::logError("OSC: Failed to send pong reply: ", e.what());
+            }
+        }
+        else if (address == "/orch_faust/set_reply_target") {
+            auto arg = m.ArgumentsBegin();
+            std::string host = "127.0.0.1";
+            int targetPort = 0;
+
+            if (arg != m.ArgumentsEnd() && arg->IsString()) {
+                host = arg->AsString();
+                arg++;
+            }
+            if (arg != m.ArgumentsEnd()) {
+                if (arg->IsInt32()) targetPort = arg->AsInt32();
+                else if (arg->IsFloat()) targetPort = static_cast<int>(arg->AsFloat());
+                else if (arg->IsDouble()) targetPort = static_cast<int>(arg->AsDouble());
+            }
+
+            setReplyTarget(host, targetPort);
+            Logger::logInfo("OSC: Editor reply target set to ", host, ":", targetPort);
+            sendEvent("reply_target_set", host, "", static_cast<float>(targetPort), 0.0f);
         }
         else {
             Logger::logWarning("OSC Unknown address pattern: ", address);

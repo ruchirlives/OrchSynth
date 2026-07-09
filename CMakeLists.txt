@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(OrchFaustSynth VERSION 1.0.0 LANGUAGES CXX C)
+project(OrchSynth VERSION 1.0.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,12 +80,12 @@ set(SOURCE_FILES
 )
 
 # VST3 Plugin Definition using Steinberg's macro
-smtg_add_vst3plugin(OrchFaustSynth
+smtg_add_vst3plugin(OrchSynth
     ${SOURCE_FILES}
 )
 
 # Link dependencies
-target_link_libraries(OrchFaustSynth
+target_link_libraries(OrchSynth
     PRIVATE
         sdk
         oscpack
@@ -96,14 +96,14 @@ target_link_libraries(OrchFaustSynth
 )
 
 # Include directories
-target_include_directories(OrchFaustSynth
+target_include_directories(OrchSynth
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${FAUST_DIR}/include
 )
 
 # Copy Faust DLL and libraries to build directory PRE_BUILD
-add_custom_command(TARGET OrchFaustSynth PRE_BUILD
+add_custom_command(TARGET OrchSynth PRE_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "${CMAKE_BINARY_DIR}/bin/Debug"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -115,15 +115,15 @@ add_custom_command(TARGET OrchFaustSynth PRE_BUILD
         "${FAUST_DIR}/lib/faust.dll"
         "${CMAKE_BINARY_DIR}/bin/Release/faust.dll"
     COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchFaustSynth.vst3/Contents/x86_64-win"
+        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchFaustSynth.vst3/Contents/x86_64-win/faust.dll"
+        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
     COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchFaustSynth.vst3/Contents/x86_64-win"
+        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchFaustSynth.vst3/Contents/x86_64-win/faust.dll"
+        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
 #    COMMAND ${CMAKE_COMMAND} -E make_directory
 #        "${CMAKE_BINARY_DIR}/bin/Debug/faust"
 #    COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -135,15 +135,15 @@ add_custom_command(TARGET OrchFaustSynth PRE_BUILD
 #        "${FAUST_DIR}/share/faust"
 #        "${CMAKE_BINARY_DIR}/bin/Release/faust"
 #    COMMAND ${CMAKE_COMMAND} -E make_directory
-#        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchFaustSynth.vst3/Contents/x86_64-win/faust"
+#        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust"
 #    COMMAND ${CMAKE_COMMAND} -E copy_directory
 #        "${FAUST_DIR}/share/faust"
-#        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchFaustSynth.vst3/Contents/x86_64-win/faust"
+#        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust"
 #    COMMAND ${CMAKE_COMMAND} -E make_directory
-#        "${CMAKE_BINARY_DIR}/VST3/Release/OrchFaustSynth.vst3/Contents/x86_64-win/faust"
+#        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust"
 #    COMMAND ${CMAKE_COMMAND} -E copy_directory
 #        "${FAUST_DIR}/share/faust"
-#        "${CMAKE_BINARY_DIR}/VST3/Release/OrchFaustSynth.vst3/Contents/x86_64-win/faust"
+#        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust"
     COMMENT "Copying faust.dll and libraries to build and VST3 folders"
 )
 

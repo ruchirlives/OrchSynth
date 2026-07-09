@@ -9,6 +9,32 @@
 
 namespace OrchFaust {
 
+struct ParamRange {
+    float minVal;
+    float maxVal;
+    float step;
+};
+
+ParamRange getParamRange(const std::string& nodeType, const std::string& paramName) {
+    if (paramName == "freq") {
+        if (nodeType == "lfo") {
+            return {0.01f, 100.0f, 0.01f};
+        }
+        return {20.0f, 10000.0f, 0.1f};
+    }
+    if (paramName == "keyboard_tracking") return {0.0f, 1.0f, 1.0f};
+    if (paramName == "cutoff") return {20.0f, 20000.0f, 1.0f};
+    if (paramName == "resonance") return {0.1f, 20.0f, 0.01f};
+    if (paramName == "gain") return {0.0f, 20000.0f, 0.1f};
+    if (paramName == "attack" || paramName == "decay" || paramName == "release") return {0.001f, 10.0f, 0.001f};
+    if (paramName == "sustain") return {0.0f, 1.0f, 0.01f};
+    if (paramName == "delay") return {0.0f, 5.0f, 0.001f};
+    if (paramName == "damping") return {0.0f, 10.0f, 0.01f};
+    if (paramName == "q") return {1.0f, 1000.0f, 1.0f};
+    if (paramName == "size" || paramName == "brightness" || paramName == "damp") return {0.0f, 1.0f, 0.01f};
+    return {0.0f, 10000.0f, 0.01f};
+}
+
 // Topological sort helper
 std::vector<std::string> topologicalSort(const Graph& graph) {
     std::set<std::string> nodeIds;
@@ -84,42 +110,12 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         ss << "// Parameters for " << node.id << " (" << node.type << ")\n";
         for (const auto& [paramName, value] : node.params) {
             float val = value;
-            float minVal = 0.0f;
-            float maxVal = 1.0f;
-            float step = 0.01f;
-            
-            if (paramName == "freq") {
-                if (node.type == "lfo") {
-                    minVal = 0.01f; maxVal = 100.0f; step = 0.01f;
-                } else {
-                    minVal = 20.0f; maxVal = 10000.0f; step = 0.1f;
-                }
-            } else if (paramName == "keyboard_tracking") {
-                minVal = 0.0f; maxVal = 1.0f; step = 1.0f;
-            } else if (paramName == "cutoff") {
-                minVal = 20.0f; maxVal = 20000.0f; step = 1.0f;
-            } else if (paramName == "gain") {
-                minVal = 0.0f; maxVal = 20000.0f; step = 0.1f;
-            } else if (paramName == "attack" || paramName == "decay" || paramName == "release") {
-                minVal = 0.001f; maxVal = 10.0f; step = 0.001f;
-            } else if (paramName == "sustain") {
-                minVal = 0.0f; maxVal = 1.0f; step = 0.01f;
-            } else if (paramName == "delay") {
-                minVal = 0.0f; maxVal = 5.0f; step = 0.001f;
-            } else if (paramName == "damping") {
-                minVal = 0.0f; maxVal = 10.0f; step = 0.01f;
-            } else if (paramName == "q") {
-                minVal = 1.0f; maxVal = 1000.0f; step = 1.0f;
-            } else if (paramName == "size" || paramName == "brightness" || paramName == "damp") {
-                minVal = 0.0f; maxVal = 1.0f; step = 0.01f;
-            } else {
-                minVal = 0.0f; maxVal = 10000.0f; step = 0.01f;
-            }
+            ParamRange range = getParamRange(node.type, paramName);
             
             // Generate slider definition
             ss << "param_" << node.id << "_" << paramName << " = hslider(\"" 
                << node.id << "/" << paramName << "\", " 
-               << val << ", " << minVal << ", " << maxVal << ", " << step << ");\n";
+               << val << ", " << range.minVal << ", " << range.maxVal << ", " << range.step << ");\n";
         }
     }
     ss << "\n";
@@ -177,7 +173,8 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                         modSS << " + node_" << modSrc;
                     }
                     modSS << ")";
-                    return modSS.str();
+                    ParamRange range = getParamRange(node.type, name);
+                    return "min(" + std::to_string(range.maxVal) + ", max(" + std::to_string(range.minVal) + ", " + modSS.str() + "))";
                 }
             }
             return baseVal;
@@ -226,18 +223,20 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         }
         else if (node.type == "lowpass") {
             std::string cutoffExpr = getParamExpr("cutoff", "2000.0");
+            std::string resonanceExpr = getParamExpr("resonance", "0.707");
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
-                ss << inputsExpr << " : fi.lowpass(2, " << cutoffExpr << ")";
+                ss << inputsExpr << " : fi.resonlp(" << cutoffExpr << ", " << resonanceExpr << ", 1.0)";
             }
         }
         else if (node.type == "highpass") {
             std::string cutoffExpr = getParamExpr("cutoff", "200.0");
+            std::string resonanceExpr = getParamExpr("resonance", "0.707");
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
-                ss << inputsExpr << " : fi.highpass(2, " << cutoffExpr << ")";
+                ss << inputsExpr << " : fi.resonhp(" << cutoffExpr << ", " << resonanceExpr << ", 1.0)";
             }
         }
         else if (node.type == "delay") {

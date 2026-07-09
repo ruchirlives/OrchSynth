@@ -234,4 +234,21 @@ void OrchFaustProcessor::handleMidiEvents(Steinberg::Vst::IEventList* eventList)
     }
 }
 
+Steinberg::tresult PLUGIN_API OrchFaustProcessor::notify(Steinberg::Vst::IMessage* message) {
+    if (!message) return Steinberg::kResultFalse;
+    
+    if (strcmp(message->getMessageID(), "GetOscServerPort") == 0) {
+        if (oscServer) {
+            if (auto* reply = allocateMessage()) {
+                reply->setMessageID("OscServerPort");
+                reply->getAttributes()->setInt("port", oscServer->getPortNum());
+                sendMessage(reply);
+            }
+        }
+        return Steinberg::kResultOk;
+    }
+    
+    return Steinberg::Vst::AudioEffect::notify(message);
+}
+
 } // namespace OrchFaust
