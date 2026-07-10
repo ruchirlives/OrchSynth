@@ -32,6 +32,10 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
     if (paramName == "damping") return {0.0f, 10.0f, 0.01f};
     if (paramName == "q") return {1.0f, 1000.0f, 1.0f};
     if (paramName == "size" || paramName == "brightness" || paramName == "damp") return {0.0f, 1.0f, 0.01f};
+    if (paramName == "velocity" || paramName == "scale" || paramName == "pitch_bend") return {-1.0f, 1.0f, 0.01f};
+    if (paramName == "aftertouch") return {0.0f, 1.0f, 0.01f};
+    if (paramName == "cc") return {0.0f, 127.0f, 1.0f};
+    if (paramName == "range") return {0.0f, 24.0f, 0.1f};
     return {0.0f, 10000.0f, 0.01f};
 }
 
@@ -96,7 +100,13 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "// Global Voice Controls\n";
     ss << "voice_freq = hslider(\"freq\", 440, 20, 20000, 0.01);\n";
     ss << "voice_gain = hslider(\"gain\", 1.0, 0, 1, 0.01);\n";
-    ss << "voice_gate = hslider(\"gate\", 0, 0, 1, 1);\n\n";
+    ss << "voice_gate = hslider(\"gate\", 0, 0, 1, 1);\n";
+    ss << "aftertouch = hslider(\"aftertouch\", 0, 0, 1, 0.01);\n";
+    ss << "pitch_bend = hslider(\"pitch_bend\", 0, -1, 1, 0.01);\n";
+    for (int cc = 0; cc < 128; ++cc) {
+        ss << "cc_" << cc << " = hslider(\"cc_" << cc << "\", 0, 0, 1, 0.01);\n";
+    }
+    ss << "\n";
     
     // Map of nodes for quick lookup
     std::map<std::string, const Node*> nodeMap;
@@ -109,6 +119,9 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     for (const auto& node : graph.nodes) {
         ss << "// Parameters for " << node.id << " (" << node.type << ")\n";
         for (const auto& [paramName, value] : node.params) {
+            if (node.type == "cc" && paramName == "cc") {
+                continue;
+            }
             float val = value;
             ParamRange range = getParamRange(node.type, paramName);
             
@@ -122,12 +135,12 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     
     // 4. Map connections (target -> sources)
     std::map<std::string, std::vector<std::string>> incomingConnections;
-    std::map<std::string, std::map<std::string, std::vector<std::string>>> parameterModulations;
+    std::map<std::string, std::map<std::string, std::vector<Connection>>> parameterModulations;
     
     for (const auto& conn : graph.connections) {
         if (!conn.targetHandle.empty() && conn.targetHandle.rfind("param-", 0) == 0) {
             std::string paramName = conn.targetHandle.substr(6); // strip "param-"
-            parameterModulations[conn.target][paramName].push_back(conn.source);
+            parameterModulations[conn.target][paramName].push_back(conn);
         } else {
             incomingConnections[conn.target].push_back(conn.source);
         }
@@ -168,11 +181,22 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                 const auto& modSources = parameterModulations.at(nodeId).at(name);
                 if (!modSources.empty()) {
                     std::stringstream modSS;
-                    modSS << "(" << baseVal;
-                    for (const auto& modSrc : modSources) {
-                        modSS << " + node_" << modSrc;
+                    modSS << "(" << baseVal << ")";
+                    for (const auto& modConn : modSources) {
+                        const Node* sourceNode = nullptr;
+                        auto sourceIt = nodeMap.find(modConn.source);
+                        if (sourceIt != nodeMap.end()) {
+                            sourceNode = sourceIt->second;
+                        }
+
+                        if (sourceNode && sourceNode->type == "pitch_bend" && name == "freq") {
+                            modSS << " * pow(2.0, node_" << modConn.source << " / 12.0)";
+                        } else if (modConn.operation == "add") {
+                            modSS << " + node_" << modConn.source;
+                        } else {
+                            modSS << " * node_" << modConn.source;
+                        }
                     }
-                    modSS << ")";
                     ParamRange range = getParamRange(node.type, name);
                     return "min(" + std::to_string(range.maxVal) + ", max(" + std::to_string(range.minVal) + ", " + modSS.str() + "))";
                 }
@@ -213,6 +237,22 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         else if (node.type == "noise") {
             ss << "no.noise";
         }
+        else if (node.type == "velocity") {
+            ss << "voice_gain * " << getParamExpr("velocity", "1.0");
+        }
+        else if (node.type == "aftertouch") {
+            ss << "aftertouch * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "pitch_bend") {
+            ss << "pitch_bend * " << getParamExpr("range", "2.0");
+        }
+        else if (node.type == "cc") {
+            int ccNumber = 1;
+            if (node.params.count("cc") > 0) {
+                ccNumber = std::clamp(static_cast<int>(node.params.at("cc")), 0, 127);
+            }
+            ss << "cc_" << ccNumber << " * " << getParamExpr("scale", "1.0");
+        }
         else if (node.type == "gain") {
             std::string gainExpr = getParamExpr("gain", "voice_gain");
             if (inputsExpr.empty()) {
@@ -252,7 +292,7 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             std::string d = getParamExpr("decay", "0.1");
             ss << "en.adsr(" << a << ", " << d << ", " 
                << getParamExpr("sustain", "0.5") << ", " 
-               << getParamExpr("release", "0.2") << ", voice_gate)";
+               << getParamExpr("release", "0.2") << ", voice_gate) * " << getParamExpr("scale", "1.0");
             if (!inputsExpr.empty()) {
                 ss << " * " << inputsExpr;
             }
@@ -262,7 +302,7 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             if (!inputsExpr.empty()) {
                 freqExpr = "max(0.01, " + freqExpr + " + (" + inputsExpr + "))";
             }
-            ss << "os.osc(" << freqExpr << ")";
+            ss << "os.osc(" << freqExpr << ") * " << getParamExpr("scale", "1.0");
         }
         else if (node.type == "mixer") {
             if (inputsExpr.empty()) {

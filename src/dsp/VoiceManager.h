@@ -22,6 +22,7 @@ public:
     void allNotesOff();
     
     void setParameter(const std::string& path, float value);
+    void setGlobalControl(const std::string& name, float value);
     float getParameter(const std::string& path);
 
     bool updateFactory(llvm_dsp_factory* newFactory);

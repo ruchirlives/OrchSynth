@@ -22,7 +22,8 @@
             "type": "STRING",
             "enum": [
               "sine", "saw", "square", "noise", "gain", "lowpass", "highpass", "delay",
-              "adsr", "lfo", "mixer", "reverb", "karplus_string", "modal_resonator", "body_resonator"
+              "adsr", "lfo", "mixer", "reverb", "karplus_string", "modal_resonator", "body_resonator",
+              "velocity"
             ]
           },
           "params": {

@@ -190,9 +190,9 @@ public:
         );
         applyFont(cbPresets, fontBody);
 
-        // Load Preset Button
+        // Reload Preset Button
         btnLoad = CreateWindowA(
-            "BUTTON", "Load Preset",
+            "BUTTON", "Reload Preset",
             WS_VISIBLE | WS_CHILD,
             352, 162, 120, 32,
             parentHwnd, (HMENU)1002, hInstance, NULL
@@ -516,11 +516,15 @@ private:
                 return (LRESULT)view->handleCtlColorStatic((HDC)wParam, (HWND)lParam);
             } else if (uMsg == WM_COMMAND) {
                 int wmId = LOWORD(wParam);
+                int notifyCode = HIWORD(wParam);
                 if (wmId == 1001) {
                     view->triggerC1NoteOn();
                     SetTimer(hWnd, 2001, 500, NULL);
                     return 0;
-                } else if (wmId == 1002) {
+                } else if (wmId == 1002 && notifyCode == BN_CLICKED) {
+                    view->loadSelectedPreset();
+                    return 0;
+                } else if (wmId == 1003 && notifyCode == CBN_SELCHANGE) {
                     view->loadSelectedPreset();
                     return 0;
                 } else if (wmId == 1004) {

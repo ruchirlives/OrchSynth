@@ -138,6 +138,13 @@ void VoiceManager::setParameter(const std::string& path, float value) {
     }
 }
 
+void VoiceManager::setGlobalControl(const std::string& name, float value) {
+    std::lock_guard<std::mutex> lock(voiceMutex);
+    for (auto& voice : voices) {
+        voice->setParameter(name, value);
+    }
+}
+
 float VoiceManager::getParameter(const std::string& path) {
     std::lock_guard<std::mutex> lock(voiceMutex);
     if (!voices.empty()) {

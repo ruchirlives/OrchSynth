@@ -35,6 +35,12 @@ std::optional<Graph> GraphParser::parse(const std::string& jsonString, std::stri
             Node node;
             node.id = jNode["id"].get<std::string>();
             node.type = jNode["type"].get<std::string>();
+            if (jNode.contains("x") && jNode["x"].is_number() &&
+                jNode.contains("y") && jNode["y"].is_number()) {
+                node.x = jNode["x"].get<float>();
+                node.y = jNode["y"].get<float>();
+                node.hasPosition = true;
+            }
             
             if (jNode.contains("params") && jNode["params"].is_object()) {
                 for (auto& el : jNode["params"].items()) {
@@ -53,29 +59,45 @@ std::optional<Graph> GraphParser::parse(const std::string& jsonString, std::stri
         }
         
         for (const auto& jConn : j["connections"]) {
-            if (!jConn.contains("source") || !jConn.contains("target")) {
+            bool hasCurrentKeys = jConn.contains("source") && jConn.contains("target");
+            bool hasLegacyKeys = jConn.contains("fromNode") && jConn.contains("toNode");
+            if (!hasCurrentKeys && !hasLegacyKeys) {
                 errorMsg = "Connection missing 'source' or 'target'";
                 return std::nullopt;
             }
             
             Connection conn;
-            conn.source = jConn["source"].get<std::string>();
-            conn.target = jConn["target"].get<std::string>();
+            conn.source = hasCurrentKeys ? jConn["source"].get<std::string>() : jConn["fromNode"].get<std::string>();
+            conn.target = hasCurrentKeys ? jConn["target"].get<std::string>() : jConn["toNode"].get<std::string>();
             if (jConn.contains("sourceHandle") && jConn["sourceHandle"].is_string()) {
                 conn.sourceHandle = jConn["sourceHandle"].get<std::string>();
             }
             if (jConn.contains("targetHandle") && jConn["targetHandle"].is_string()) {
                 conn.targetHandle = jConn["targetHandle"].get<std::string>();
+            } else if (jConn.contains("toInput") && jConn["toInput"].is_number_integer()) {
+                conn.targetHandle = "input-" + std::to_string(jConn["toInput"].get<int>());
+            }
+            if (jConn.contains("operation") && jConn["operation"].is_string()) {
+                conn.operation = jConn["operation"].get<std::string>();
             }
             graph.connections.push_back(conn);
         }
         
         // Parse Output Node
-        if (!j.contains("output") || !j["output"].is_string()) {
+        if (j.contains("output") && j["output"].is_string()) {
+            graph.outputNodeId = j["output"].get<std::string>();
+        } else {
+            for (const auto& node : graph.nodes) {
+                if (node.type == "output") {
+                    graph.outputNodeId = node.id;
+                    break;
+                }
+            }
+        }
+        if (graph.outputNodeId.empty()) {
             errorMsg = "Missing or invalid 'output' node specification";
             return std::nullopt;
         }
-        graph.outputNodeId = j["output"].get<std::string>();
         
         // Validate Graph
         if (!validate(graph, errorMsg)) {

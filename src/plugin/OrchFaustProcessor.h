@@ -33,6 +33,7 @@ public:
 
 private:
     void handleMidiEvents(Steinberg::Vst::IEventList* eventList);
+    void applyCurrentMidiControls();
     void checkAndApplyOscCommands();
 
     VoiceManager voiceManager;
@@ -44,6 +45,9 @@ private:
     
     // Store current graph state
     std::string currentGraphJson;
+    float currentAftertouch = 0.0f;
+    float currentPitchBend = 0.0f;
+    float currentCcValues[128] = {};
 
     // Compiler helper
     void processLoadGraph(const std::string& jsonStr);

@@ -5,8 +5,10 @@
 #include "util/Logging.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "faust/dsp/llvm-dsp.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
 
 #include <windows.h>
+#include <algorithm>
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace OrchFaust {
@@ -43,6 +45,7 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::initialize(Steinberg::FUnknown
 
     // Add stereo audio outputs
     addAudioOutput(STR16("Audio Output"), Steinberg::Vst::MediaTypes::kAudio);
+    addEventInput(STR16("Event Input"), 16);
     
     // Start OSC server
     oscServer = std::make_unique<OscServer>(commandQueue);
@@ -109,6 +112,7 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::Proces
     }
     if (newFactory) {
         voiceManager.updateFactory(newFactory);
+        applyCurrentMidiControls();
     }
 
     // 3. Process incoming VST3 MIDI events
@@ -225,12 +229,42 @@ void OrchFaustProcessor::handleMidiEvents(Steinberg::Vst::IEventList* eventList)
             switch (e.type) {
                 case Steinberg::Vst::Event::kNoteOnEvent:
                     voiceManager.noteOn(static_cast<int>(e.noteOn.pitch), e.noteOn.velocity);
+                    applyCurrentMidiControls();
                     break;
                 case Steinberg::Vst::Event::kNoteOffEvent:
                     voiceManager.noteOff(static_cast<int>(e.noteOff.pitch));
                     break;
+                case Steinberg::Vst::Event::kPolyPressureEvent:
+                    currentAftertouch = std::clamp(e.polyPressure.pressure, 0.0f, 1.0f);
+                    voiceManager.setGlobalControl("aftertouch", currentAftertouch);
+                    break;
+                case Steinberg::Vst::Event::kLegacyMIDICCOutEvent: {
+                    const int controlNumber = static_cast<int>(e.midiCCOut.controlNumber);
+                    if (controlNumber == Steinberg::Vst::kAfterTouch) {
+                        currentAftertouch = std::clamp(static_cast<float>(e.midiCCOut.value) / 127.0f, 0.0f, 1.0f);
+                        voiceManager.setGlobalControl("aftertouch", currentAftertouch);
+                    } else if (controlNumber == Steinberg::Vst::kPitchBend) {
+                        const int lsb = static_cast<int>(e.midiCCOut.value) & 0x7f;
+                        const int msb = static_cast<int>(e.midiCCOut.value2) & 0x7f;
+                        const int raw = (msb << 7) | lsb;
+                        currentPitchBend = std::clamp((static_cast<float>(raw) - 8192.0f) / 8192.0f, -1.0f, 1.0f);
+                        voiceManager.setGlobalControl("pitch_bend", currentPitchBend);
+                    } else if (controlNumber >= 0 && controlNumber < 128) {
+                        currentCcValues[controlNumber] = std::clamp(static_cast<float>(e.midiCCOut.value) / 127.0f, 0.0f, 1.0f);
+                        voiceManager.setGlobalControl("cc_" + std::to_string(controlNumber), currentCcValues[controlNumber]);
+                    }
+                    break;
+                }
             }
         }
+    }
+}
+
+void OrchFaustProcessor::applyCurrentMidiControls() {
+    voiceManager.setGlobalControl("aftertouch", currentAftertouch);
+    voiceManager.setGlobalControl("pitch_bend", currentPitchBend);
+    for (int cc = 0; cc < 128; ++cc) {
+        voiceManager.setGlobalControl("cc_" + std::to_string(cc), currentCcValues[cc]);
     }
 }
 
