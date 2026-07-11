@@ -1,4 +1,4 @@
-#include "FaustGraphCompiler.h"
+﻿#include "FaustGraphCompiler.h"
 #include "util/Logging.h"
 #include <sstream>
 #include <set>
@@ -17,6 +17,28 @@ struct ParamRange {
 };
 
 ParamRange getParamRange(const std::string& nodeType, const std::string& paramName) {
+    // Node-specific overrides for feedback-based nodes that need tighter ranges
+    if (nodeType == "resonator_reverb_loop") {
+        if (paramName == "gain") return {0.0f, 5.0f, 0.01f};
+        if (paramName == "q") return {1.0f, 100.0f, 1.0f};
+    }
+    if (nodeType == "sympathetic_strings") {
+        if (paramName == "gain") return {0.0f, 5.0f, 0.01f};
+        if (paramName == "q") return {1.0f, 80.0f, 1.0f};
+        if (paramName == "sym_decay") return {0.1f, 20.0f, 0.01f};
+        if (paramName == "sym_coupling") return {0.0f, 2.0f, 0.01f};
+        if (paramName == "jawari") return {0.0f, 1.0f, 0.01f};
+        if (paramName == "bridge_tone") return {0.0f, 1.0f, 0.01f};
+        if (paramName == "tuning_preset") return {0.0f, 4.0f, 1.0f};
+        if (paramName == "sym_feedback") return {0.0f, 0.75f, 0.01f};
+        if (paramName == "sym_loss") return {0.0f, 1.0f, 0.01f};
+        if (paramName == "sym_damp") return {100.0f, 20000.0f, 1.0f};
+        if (paramName == "sym_delay") return {0.001f, 0.5f, 0.001f};
+        if (paramName.rfind("string_", 0) == 0 && paramName.find("_semitones") != std::string::npos) {
+            return {-24.0f, 48.0f, 1.0f};
+        }
+    }
+
     if (paramName == "freq") {
         if (nodeType == "lfo") {
             return {0.01f, 100.0f, 0.01f};
@@ -50,6 +72,7 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
     if (paramName == "flute_tune_cents") return {-100.0f, 100.0f, 1.0f};
     if (paramName == "flute_track_scale") return {0.9f, 1.1f, 0.001f};
     if (paramName == "flute_length_offset") return {0.0f, 0.5f, 0.001f};
+    if (paramName == "offset") return {-5000.0f, 5000.0f, 0.1f};
     return {0.0f, 10000.0f, 0.01f};
 }
 
@@ -336,7 +359,9 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                             sourceNode = sourceIt->second;
                         }
 
-                        if (sourceNode && sourceNode->type == "pitch_bend" && name == "freq") {
+                        if (name == "freq") {
+                            // Any modulation targeting freq is treated as semitones
+                            // and applied exponentially for musically correct pitch shifting
                             modSS << " * pow(2.0, node_" << modConn.source << " / 12.0)";
                         } else if (modConn.operation == "add") {
                             modSS << " + node_" << modConn.source;
@@ -416,10 +441,11 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         }
         else if (node.type == "gain") {
             std::string gainExpr = getParamExpr("gain", "voice_gain");
+            std::string offsetExpr = getParamExpr("offset", "0.0");
             if (inputsExpr.empty()) {
                 ss << "*(0.0)"; // No input
             } else {
-                ss << inputsExpr << " * " << gainExpr;
+                ss << "(" << inputsExpr << " * " << gainExpr << " + " << offsetExpr << ")";
             }
         }
         else if (node.type == "lowpass") {
@@ -473,14 +499,21 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             }
         }
         else if (node.type == "reverb") {
-            // Simple comb-filter based feedback reverb (mono)
             std::string sizeExpr = getParamExpr("size", "0.5");
             std::string dampExpr = getParamExpr("damp", "0.5");
+            std::string wetExpr = getParamExpr("wet", "0.35");
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
-                // Use standard mono freeverb
-                ss << inputsExpr << " : re.mono_freeverb(" << sizeExpr << ", 0.5, " << dampExpr << ", 0.0)";
+                // Faust's mono Freeverb sounds much better as a blended effect than
+                // as a fully wet insert. Keep feedback below runaway/metallic ranges,
+                // remove low-frequency buildup before the tank, and darken the tail.
+                ss << "((" << inputsExpr << ") * (1.0 - " << wetExpr << ") + "
+                   << "((" << inputsExpr << ") : fi.highpass(1, 80.0) "
+                   << ": re.mono_freeverb(min(0.96, 0.35 + (" << sizeExpr << " * 0.6)), 0.55, "
+                   << dampExpr << ", 23.0) "
+                   << ": fi.lowpass(2, max(1200.0, 12000.0 - (" << dampExpr << " * 9000.0))) "
+                   << "* " << wetExpr << ")) : ma.tanh";
             }
         }
         else if (node.type == "resonator_reverb_loop") {
@@ -496,12 +529,15 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
+                // ma.tanh inside the feedback path provides soft saturation to prevent
+                // the resonant feedback loop from blowing up to inf/NaN and cutting out.
+                // Final ma.tanh on output is a safety limiter.
                 ss << "((" << inputsExpr << " <: *(1.0 - " << wetExpr << "), "
                    << "(((+ : fi.resonbp(" << freqExpr << ", " << qExpr << ", 1.0) "
                    << ": re.mono_freeverb(" << sizeExpr << ", 0.5, " << dampExpr << ", 0.0)) "
-                   << "~ (de.sdelay(262144, 1024, " << feedbackDelayExpr << " * ma.SR) "
+                   << "~ (ma.tanh : de.sdelay(262144, 1024, " << feedbackDelayExpr << " * ma.SR) "
                    << ": fi.lowpass(1, " << feedbackDampExpr << ") : *(" << feedbackExpr << "))) "
-                   << ": *(" << wetExpr << "))) : +) * " << gainExpr;
+                   << ": *(" << wetExpr << "))) : +) * " << gainExpr << " : ma.tanh";
             }
         }
         else if (node.type == "karplus_string") {
@@ -591,8 +627,14 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
-                // Highpass/Lowpass filterbank or simple bandpass resonator
-                ss << inputsExpr << " : fi.resonbp(100.0 * (1.0 + " << sizeExpr << " * 10.0), 5.0, 1.0)";
+                std::string baseFreq = "(120.0 + " + sizeExpr + " * 1180.0)";
+                std::string brightFreq = "(400.0 + " + brightnessExpr + " * 7600.0)";
+                std::string highModeGain = "(0.15 + " + brightnessExpr + " * 0.85)";
+                ss << inputsExpr << " : ("
+                   << "_ <: "
+                   << "fi.resonbp(" << baseFreq << ", 4.0, 0.75), "
+                   << "fi.resonbp(" << baseFreq << " * (1.8 + " << brightnessExpr << " * 0.7), 7.0, " << highModeGain << ")"
+                   << " :> _ : fi.lowpass(1, " << brightFreq << "))";
             }
         }
         else if (node.type == "modal_resonator") {
@@ -623,12 +665,99 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             if (inputsExpr.empty()) {
                 ss << "0.0";
             } else {
-                ss << inputsExpr << " : pm.modalModel(4, ("
-                   << freqExpr << ", " << freqExpr << " * 1.5, "
-                   << freqExpr << " * 2.1, " << freqExpr << " * 2.8), ("
-                   << t60Expr << ", " << t60Expr << " * 0.7, "
-                   << t60Expr << " * 0.45, " << t60Expr << " * 0.3), (1.0, "
-                   << brightnessExpr << ", 0.5, 0.25))";
+                std::string qExpr = "(8.0 + " + t60Expr + " * 120.0)";
+                ss << inputsExpr << " : (_ <: "
+                   << "fi.resonbp(" << freqExpr << ", " << qExpr << ", 0.55), "
+                   << "fi.resonbp(" << freqExpr << " * 1.5, " << qExpr << " * 0.75, 0.35 + " << brightnessExpr << " * 0.20), "
+                   << "fi.resonbp(" << freqExpr << " * 2.1, " << qExpr << " * 0.55, " << brightnessExpr << " * 0.35), "
+                   << "fi.resonbp(" << freqExpr << " * 2.8, " << qExpr << " * 0.40, " << brightnessExpr << " * 0.22)"
+                   << " :> _ : *(0.35))";
+            }
+        }
+        else if (node.type == "sympathetic_strings") {
+            // Sympathetic string resonator: six independently tuned physical string
+            // waveguides driven by the incoming signal. This keeps the graph acyclic
+            // at the editor level while using Faust's internal string/body model.
+            std::string freqExpr = getTrackedFreqExpr();
+            std::string qExpr = getParamExpr("q", "35.0");
+            std::string decayExpr = getParamExpr("sym_decay", "5.0");
+            std::string couplingExpr = getParamExpr("sym_coupling", "0.8");
+            std::string jawariExpr = getParamExpr("jawari", "0.25");
+            std::string bridgeToneExpr = getParamExpr("bridge_tone", "0.45");
+            std::string tuningPresetExpr = getParamExpr("tuning_preset", "0.0");
+            std::string wetExpr = getParamExpr("wet", "0.6");
+            std::string gainExpr = getParamExpr("gain", "0.8");
+            std::string s1Expr = getParamExpr("string_1_semitones", "0.0");
+            std::string s2Expr = getParamExpr("string_2_semitones", "7.0");
+            std::string s3Expr = getParamExpr("string_3_semitones", "12.0");
+            std::string s4Expr = getParamExpr("string_4_semitones", "19.0");
+            std::string s5Expr = getParamExpr("string_5_semitones", "24.0");
+            std::string s6Expr = getParamExpr("string_6_semitones", "31.0");
+            if (inputsExpr.empty()) {
+                ss << "0.0";
+            } else {
+                std::string dampingExpr = "(min(0.985, max(0.15, 0.35 + (" + decayExpr + " / 20.0) * 0.55 + (" + qExpr + " / 80.0) * 0.10)))";
+                std::string presetIndex = "(floor(" + tuningPresetExpr + " + 0.5))";
+                auto presetSemitone = [&](const std::string& customExpr,
+                                           const std::string& sitar,
+                                           const std::string& fifths,
+                                           const std::string& chromatic,
+                                           const std::string& drone) {
+                    return "("
+                        + customExpr + " * (" + presetIndex + " < 0.5)"
+                        + " + " + sitar + " * (" + presetIndex + " >= 0.5) * (" + presetIndex + " < 1.5)"
+                        + " + " + fifths + " * (" + presetIndex + " >= 1.5) * (" + presetIndex + " < 2.5)"
+                        + " + " + chromatic + " * (" + presetIndex + " >= 2.5) * (" + presetIndex + " < 3.5)"
+                        + " + " + drone + " * (" + presetIndex + " >= 3.5)"
+                        + ")";
+                };
+                std::string t1Expr = presetSemitone(s1Expr, "0.0", "0.0", "0.0", "-12.0");
+                std::string t2Expr = presetSemitone(s2Expr, "2.0", "7.0", "1.0", "-7.0");
+                std::string t3Expr = presetSemitone(s3Expr, "4.0", "12.0", "2.0", "0.0");
+                std::string t4Expr = presetSemitone(s4Expr, "7.0", "19.0", "3.0", "0.0");
+                std::string t5Expr = presetSemitone(s5Expr, "9.0", "24.0", "4.0", "7.0");
+                std::string t6Expr = presetSemitone(s6Expr, "12.0", "31.0", "5.0", "12.0");
+                auto appendString = [&](const std::string& semitones,
+                                        const std::string& detuneCents,
+                                        const std::string& stringGain,
+                                        const std::string& pluckPosition) {
+                    std::string tunedFreq = "(" + freqExpr + " * pow(2.0, (" + semitones + " + " + detuneCents + " / 100.0) / 12.0))";
+                    std::string lengthExpr = "pm.f2l(" + tunedFreq + ")";
+                    ss << "(*(" << couplingExpr << " * " << stringGain << ")"
+                       << " : (_ <: _, (*(4.0 + " << jawariExpr << " * 18.0) : +(0.35) : ma.tanh : -(ma.tanh(0.35)) : *(" << jawariExpr << ")) : +)"
+                       << " : fi.highpass(1, 120.0)"
+                       << " : fi.lowpass(1, 9000.0)"
+                       << " : (_ <: _, (_, _ : * : -(0.02) : *(" << jawariExpr << " * 0.18)) : +)"
+                       << " : fi.highpass(1, 35.0)"
+                       << " : fi.lowpass(1, 7000.0)"
+                       << " : pm.guitarModel(" << lengthExpr << ", " << pluckPosition << ")"
+                       << " : *((" << dampingExpr << ") * " << stringGain << "))";
+                };
+                // Structure: ((dry_path, wet_path) : +) * gain : ma.tanh
+                // wet_path = six independently tuned physical string/body models.
+                // q and sym_decay bias the damping amount without exposing the old
+                // feedback-delay parameters.
+                ss << "((";
+                ss << inputsExpr << " <: *(1.0 - " << wetExpr << "), ";
+                ss << "(_ <: ";
+                appendString(t1Expr, "-3.0", "0.95", "0.18");
+                ss << ", ";
+                appendString(t2Expr, "2.0", "0.82", "0.22");
+                ss << ", ";
+                appendString(t3Expr, "-1.5", "0.70", "0.27");
+                ss << ", ";
+                appendString(t4Expr, "3.5", "0.58", "0.31");
+                ss << ", ";
+                appendString(t5Expr, "-4.0", "0.46", "0.36");
+                ss << ", ";
+                appendString(t6Expr, "1.0", "0.36", "0.41");
+                ss << " :> _ : fi.highpass(1, 55.0) : "
+                   << "(_ <: "
+                   << "fi.lowpass(1, 3200.0 + (1.0 - " << bridgeToneExpr << ") * 5200.0), "
+                   << "fi.resonbp(850.0 + " << bridgeToneExpr << " * 2400.0, 2.0 + " << bridgeToneExpr << " * 10.0, " << bridgeToneExpr << " * 0.55), "
+                   << "(fi.highpass(1, 1800.0) : *(" << bridgeToneExpr << " * 0.22))"
+                   << " :> _) : *(0.30) ";
+                ss << ": *(" << wetExpr << "))) : +) * " << gainExpr << " : ma.tanh";
             }
         }
         else {

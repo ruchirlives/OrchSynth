@@ -46,6 +46,37 @@ int main() {
                 }
             },
             {
+                "id": "sym1",
+                "type": "sympathetic_strings",
+                "params": {
+                    "freq": 440.0,
+                    "keyboard_tracking": 1.0,
+                    "tuning_preset": 1.0,
+                    "q": 35.0,
+                    "sym_decay": 5.0,
+                    "sym_coupling": 0.8,
+                    "jawari": 0.25,
+                    "bridge_tone": 0.45,
+                    "string_1_semitones": 0.0,
+                    "string_2_semitones": 7.0,
+                    "string_3_semitones": 12.0,
+                    "string_4_semitones": 19.0,
+                    "string_5_semitones": 24.0,
+                    "string_6_semitones": 31.0,
+                    "wet": 0.6,
+                    "gain": 0.8
+                }
+            },
+            {
+                "id": "rev1",
+                "type": "reverb",
+                "params": {
+                    "size": 0.55,
+                    "damp": 0.35,
+                    "wet": 0.35
+                }
+            },
+            {
                 "id": "out1",
                 "type": "output",
                 "params": {}
@@ -58,6 +89,14 @@ int main() {
             },
             {
                 "source": "gain1",
+                "target": "sym1"
+            },
+            {
+                "source": "sym1",
+                "target": "rev1"
+            },
+            {
+                "source": "rev1",
                 "target": "out1"
             }
         ],
