@@ -30,6 +30,8 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
     if (paramName == "attack" || paramName == "decay" || paramName == "release") return {0.001f, 10.0f, 0.001f};
     if (paramName == "sustain") return {0.0f, 1.0f, 0.01f};
     if (paramName == "delay") return {0.0f, 5.0f, 0.001f};
+    if (paramName == "feedback_delay") return {0.001f, 5.0f, 0.001f};
+    if (paramName == "feedback_damp") return {20.0f, 20000.0f, 1.0f};
     if (paramName == "damping") return {0.0f, 10.0f, 0.01f};
     if (paramName == "q") return {1.0f, 1000.0f, 1.0f};
     if (paramName == "size" || paramName == "brightness" || paramName == "damp" ||
@@ -37,7 +39,8 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
         paramName == "bow_velocity" || paramName == "bow_position" || paramName == "pressure" ||
         paramName == "reed_stiffness" || paramName == "bell_opening" ||
         paramName == "lips_tension" || paramName == "mouth_position" ||
-        paramName == "strike_sharpness" || paramName == "t60") return {0.0f, 1.0f, 0.01f};
+        paramName == "strike_sharpness" || paramName == "t60" ||
+        paramName == "feedback" || paramName == "wet") return {0.0f, 1.0f, 0.01f};
     if (paramName == "strike_position") return {0.0f, 6.0f, 0.01f};
     if (paramName == "strike_cutoff") return {20.0f, 20000.0f, 1.0f};
     if (paramName == "velocity" || paramName == "scale" || paramName == "pitch_bend") return {-1.0f, 1.0f, 0.01f};
@@ -478,6 +481,27 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             } else {
                 // Use standard mono freeverb
                 ss << inputsExpr << " : re.mono_freeverb(" << sizeExpr << ", 0.5, " << dampExpr << ", 0.0)";
+            }
+        }
+        else if (node.type == "resonator_reverb_loop") {
+            std::string freqExpr = getTrackedFreqExpr();
+            std::string qExpr = getParamExpr("q", "100.0");
+            std::string sizeExpr = getParamExpr("size", "0.6");
+            std::string dampExpr = getParamExpr("damp", "0.35");
+            std::string feedbackExpr = "min(0.98, " + getParamExpr("feedback", "0.35") + ")";
+            std::string feedbackDelayExpr = getParamExpr("feedback_delay", "0.08");
+            std::string feedbackDampExpr = getParamExpr("feedback_damp", "3000.0");
+            std::string wetExpr = getParamExpr("wet", "0.7");
+            std::string gainExpr = getParamExpr("gain", "0.8");
+            if (inputsExpr.empty()) {
+                ss << "0.0";
+            } else {
+                ss << "((" << inputsExpr << " <: *(1.0 - " << wetExpr << "), "
+                   << "(((+ : fi.resonbp(" << freqExpr << ", " << qExpr << ", 1.0) "
+                   << ": re.mono_freeverb(" << sizeExpr << ", 0.5, " << dampExpr << ", 0.0)) "
+                   << "~ (de.sdelay(262144, 1024, " << feedbackDelayExpr << " * ma.SR) "
+                   << ": fi.lowpass(1, " << feedbackDampExpr << ") : *(" << feedbackExpr << "))) "
+                   << ": *(" << wetExpr << "))) : +) * " << gainExpr;
             }
         }
         else if (node.type == "karplus_string") {
