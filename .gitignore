@@ -51,6 +51,7 @@ packages/
 *.txt_err
 *.stdout.txt
 *.stderr.txt
+scratch/
 bridge_vst_test_build.log
 bridge_vst_test_output.txt
 bridge_vst_test_output.txt_err
