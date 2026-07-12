@@ -1,13 +1,18 @@
 #include "FaustEngine.h"
 #include "util/Logging.h"
 #include "faust/dsp/llvm-dsp.h"
+#ifdef _WIN32
 #include <windows.h>
-
 extern "C" IMAGE_DOS_HEADER __ImageBase;
+#else
+#include <dlfcn.h>
+#include <limits.h>
+#endif
 
 namespace OrchFaust {
 
 static std::string getDllDir() {
+#ifdef _WIN32
     char path[MAX_PATH];
     GetModuleFileNameA((HINSTANCE)&__ImageBase, path, MAX_PATH);
     std::string s(path);
@@ -16,6 +21,17 @@ static std::string getDllDir() {
         return s.substr(0, lastSlash);
     }
     return "";
+#else
+    Dl_info info;
+    if (dladdr((void*)&getDllDir, &info) && info.dli_fname) {
+        std::string s(info.dli_fname);
+        size_t lastSlash = s.find_last_of("/");
+        if (lastSlash != std::string::npos) {
+            return s.substr(0, lastSlash);
+        }
+    }
+    return "";
+#endif
 }
 
 FaustEngine::FaustEngine()
@@ -52,7 +68,11 @@ bool FaustEngine::compileFromCode(const std::string& name, const std::string& co
     Logger::logInfo("FaustEngine: Compiling ", name, "...");
     
     std::string dllDir = getDllDir();
+#ifdef _WIN32
     std::string importPath = dllDir + "\\faust";
+#else
+    std::string importPath = dllDir + "/faust";
+#endif
     Logger::logInfo("FaustEngine: Import path configured as: ", importPath);
 
     // Setup compiler arguments

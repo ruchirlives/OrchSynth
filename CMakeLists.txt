@@ -85,15 +85,25 @@ smtg_add_vst3plugin(OrchSynth
 )
 
 # Link dependencies
-target_link_libraries(OrchSynth
-    PRIVATE
-        sdk
-        oscpack
-        nlohmann_json::nlohmann_json
-        faust
-        ws2_32
-        winmm
-)
+if(WIN32)
+    target_link_libraries(OrchSynth
+        PRIVATE
+            sdk
+            oscpack
+            nlohmann_json::nlohmann_json
+            faust
+            ws2_32
+            winmm
+    )
+else()
+    target_link_libraries(OrchSynth
+        PRIVATE
+            sdk
+            oscpack
+            nlohmann_json::nlohmann_json
+            faust
+    )
+endif()
 
 # Include directories
 target_include_directories(OrchSynth
@@ -102,55 +112,75 @@ target_include_directories(OrchSynth
         ${FAUST_DIR}/include
 )
 
-# Copy Faust DLL and libraries to build directory PRE_BUILD
-add_custom_command(TARGET OrchSynth PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/bin/Debug"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/bin/Debug/faust.dll"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/bin/Release"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/bin/Release/faust.dll"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${FAUST_DIR}/lib/faust.dll"
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/LICENSE.txt"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/LICENSE.txt"
-    # Copy only .lib files from Faust standard library
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/bin/Debug/faust"
-    COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/bin/Debug/faust/' }"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/bin/Release/faust"
-    COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/bin/Release/faust/' }"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust"
-    COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust/' }"
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust"
-    COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust/' }"
-    COMMENT "Copying faust.dll and libraries to build and VST3 folders"
-)
+# Copy Faust DLL and libraries to build directory PRE_BUILD (Windows only)
+if(WIN32)
+    add_custom_command(TARGET OrchSynth PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/bin/Debug"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FAUST_DIR}/lib/faust.dll"
+            "${CMAKE_BINARY_DIR}/bin/Debug/faust.dll"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/bin/Release"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FAUST_DIR}/lib/faust.dll"
+            "${CMAKE_BINARY_DIR}/bin/Release/faust.dll"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FAUST_DIR}/lib/faust.dll"
+            "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FAUST_DIR}/lib/faust.dll"
+            "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
+            "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+            "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/LICENSE.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
+            "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+            "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/LICENSE.txt"
+        # Copy only .lib files from Faust standard library
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/bin/Debug/faust"
+        COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/bin/Debug/faust/' }"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/bin/Release/faust"
+        COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/bin/Release/faust/' }"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust"
+        COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/Contents/x86_64-win/faust/' }"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust"
+        COMMAND powershell -Command "Get-ChildItem '${FAUST_DIR}/share/faust/*.lib' | ForEach-Object { Copy-Item $_.FullName '${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust/' }"
+        COMMENT "Copying faust.dll and libraries to build and VST3 folders"
+    )
+endif()
+
+# Copy Faust standard libraries into the VST3 bundle for macOS POST_BUILD
+if(APPLE)
+    add_custom_command(TARGET OrchSynth POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:OrchSynth>/faust"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${FAUST_DIR}/share/faust"
+            "$<TARGET_FILE_DIR:OrchSynth>/faust"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
+            "$<TARGET_FILE_DIR:OrchSynth>/../THIRD_PARTY_LICENSES.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+            "$<TARGET_FILE_DIR:OrchSynth>/../LICENSE.txt"
+        COMMENT "Copying Faust standard libraries and licenses into macOS VST3 bundle"
+    )
+endif()
 
 # Add standalone test executable
 add_executable(test_faust
@@ -172,12 +202,17 @@ target_include_directories(test_faust
         ${FAUST_DIR}/include
 )
 add_custom_command(TARGET test_faust POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${FAUST_DIR}/lib/faust.dll"
-        $<TARGET_FILE_DIR:test_faust>
     COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:test_faust>/faust
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${FAUST_DIR}/share/faust"
         $<TARGET_FILE_DIR:test_faust>/faust
 )
+if(WIN32)
+    add_custom_command(TARGET test_faust POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FAUST_DIR}/lib/faust.dll"
+            $<TARGET_FILE_DIR:test_faust>
+    )
+endif()
+

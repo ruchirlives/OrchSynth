@@ -7,13 +7,19 @@
 #include "faust/dsp/llvm-dsp.h"
 #include "pluginterfaces/vst/ivstmidicontrollers.h"
 
+#ifdef _WIN32
 #include <windows.h>
-#include <algorithm>
 extern "C" IMAGE_DOS_HEADER __ImageBase;
+#else
+#include <dlfcn.h>
+#include <limits.h>
+#endif
+#include <algorithm>
 
 namespace OrchFaust {
 
 static std::string getDllDir() {
+#ifdef _WIN32
     char path[MAX_PATH];
     GetModuleFileNameA((HINSTANCE)&__ImageBase, path, MAX_PATH);
     std::string s(path);
@@ -22,6 +28,17 @@ static std::string getDllDir() {
         return s.substr(0, lastSlash);
     }
     return "";
+#else
+    Dl_info info;
+    if (dladdr((void*)&getDllDir, &info) && info.dli_fname) {
+        std::string s(info.dli_fname);
+        size_t lastSlash = s.find_last_of("/");
+        if (lastSlash != std::string::npos) {
+            return s.substr(0, lastSlash);
+        }
+    }
+    return "";
+#endif
 }
 
 const Steinberg::FUID OrchFaustProcessorUID(0x8D385BAA, 0x8C1E4F43, 0x9330922D, 0xCD26FB1F);
@@ -60,7 +77,11 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::initialize(Steinberg::FUnknown
         "process = os.osc(voice_freq) * voice_gain * voice_gate <: _, _;\n";
         
     std::string dllDir = getDllDir();
+#ifdef _WIN32
     std::string importPath = dllDir + "\\faust";
+#else
+    std::string importPath = dllDir + "/faust";
+#endif
     std::vector<const char*> argv;
     argv.push_back("-I");
     argv.push_back(importPath.c_str());
@@ -191,7 +212,11 @@ void OrchFaustProcessor::processCompile() {
     Logger::logInfo("Generated Faust Code:\n", dspCode);
     
     std::string dllDir = getDllDir();
+#ifdef _WIN32
     std::string importPath = dllDir + "\\faust";
+#else
+    std::string importPath = dllDir + "/faust";
+#endif
     
     std::vector<const char*> argv;
     argv.push_back("-I");

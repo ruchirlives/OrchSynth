@@ -1,7 +1,13 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
 #include <windows.h>
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+#else
+#include <dlfcn.h>
+#include <limits.h>
+#endif
 #include "graph/GraphParser.h"
 #include "graph/FaustGraphCompiler.h"
 #include "dsp/VoiceManager.h"
@@ -9,8 +15,8 @@
 #include "faust/dsp/llvm-dsp.h"
 
 // Helper to get directory of current module
-extern "C" IMAGE_DOS_HEADER __ImageBase;
 static std::string getDllDir() {
+#ifdef _WIN32
     char path[MAX_PATH];
     GetModuleFileNameA((HINSTANCE)&__ImageBase, path, MAX_PATH);
     std::string s(path);
@@ -19,6 +25,17 @@ static std::string getDllDir() {
         return s.substr(0, lastSlash);
     }
     return "";
+#else
+    Dl_info info;
+    if (dladdr((void*)&getDllDir, &info) && info.dli_fname) {
+        std::string s(info.dli_fname);
+        size_t lastSlash = s.find_last_of("/");
+        if (lastSlash != std::string::npos) {
+            return s.substr(0, lastSlash);
+        }
+    }
+    return "";
+#endif
 }
 
 int main() {
@@ -124,7 +141,11 @@ int main() {
 
     // 4. Initialize Faust Compiler arguments
     std::string dllDir = getDllDir();
+#ifdef _WIN32
     std::string importPath = dllDir + "\\faust";
+#else
+    std::string importPath = dllDir + "/faust";
+#endif
     std::cout << "   Using import path: " << importPath << std::endl;
 
     std::vector<const char*> argv;

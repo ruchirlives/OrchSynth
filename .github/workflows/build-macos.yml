@@ -1,0 +1,95 @@
+name: Build macOS VST3
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          brew install cmake
+          
+      - name: Download and extract Faust v2.85.5
+        run: |
+          FAUST_VERSION="2.85.5"
+          echo "Downloading Faust DMGs..."
+          curl -L -O "https://github.com/grame-cncm/faust/releases/download/${FAUST_VERSION}/Faust-${FAUST_VERSION}-x64.dmg"
+          curl -L -O "https://github.com/grame-cncm/faust/releases/download/${FAUST_VERSION}/Faust-${FAUST_VERSION}-arm64.dmg"
+          
+          echo "Mounting DMGs..."
+          hdiutil attach "Faust-${FAUST_VERSION}-x64.dmg" -mountpoint /Volumes/Faust-x64
+          hdiutil attach "Faust-${FAUST_VERSION}-arm64.dmg" -mountpoint /Volumes/Faust-arm64
+          
+          echo "Creating third-party directories..."
+          mkdir -p third_party/libfaust/lib
+          mkdir -p third_party/libfaust/include
+          mkdir -p third_party/libfaust/share/faust
+          
+          echo "Copying headers..."
+          cp -R /Volumes/Faust-arm64/Faust-${FAUST_VERSION}/include/ third_party/libfaust/include/
+          
+          echo "Copying Faust standard libraries..."
+          cp -R /Volumes/Faust-arm64/Faust-${FAUST_VERSION}/share/faust/ third_party/libfaust/share/faust/
+          
+          echo "Creating Universal static library for libfaust..."
+          lipo -create \
+            /Volumes/Faust-x64/Faust-${FAUST_VERSION}/lib/libfaust.a \
+            /Volumes/Faust-arm64/Faust-${FAUST_VERSION}/lib/libfaust.a \
+            -output third_party/libfaust/lib/libfaust.a
+            
+          echo "Verifying Universal static library..."
+          lipo -info third_party/libfaust/lib/libfaust.a
+          
+          echo "Unmounting DMGs..."
+          hdiutil detach /Volumes/Faust-x64
+          hdiutil detach /Volumes/Faust-arm64
+          rm "Faust-${FAUST_VERSION}-x64.dmg"
+          rm "Faust-${FAUST_VERSION}-arm64.dmg"
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3
+        run: |
+          cd build
+          cmake --build . --config Release --parallel
+
+      - name: Verify build outputs
+        run: |
+          VST3_PATH="build/VST3/Release/OrchSynth.vst3"
+          if [ -d "$VST3_PATH" ]; then
+            echo "VST3 build succeeded!"
+            lipo -info "$VST3_PATH/Contents/MacOS/OrchSynth"
+          else
+            echo "Error: VST3 bundle not found!"
+            exit 1
+          fi
+
+      - name: Compress VST3 bundle
+        run: |
+          cd build/VST3/Release
+          zip -r ../../../OrchSynth-macOS.vst3.zip OrchSynth.vst3
+
+      - name: Upload VST3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrchSynth-macOS-vst3
+          path: OrchSynth-macOS.vst3.zip
+          if-no-files-found: error
