@@ -9,7 +9,7 @@
 #define VERSION_STR "1.0.0"
 #endif
 
-BEGIN_FACTORY_DEF("GRAME-CNCM & Orch", "https://faust.grame.fr", "info@grame.fr")
+BEGIN_FACTORY_DEF("Orch", "https://github.com/ruchirlives", "")
 
     // The Audio Processor
     DEF_CLASS2(INLINE_UID_FROM_FUID(OrchFaust::OrchFaustProcessorUID),
