@@ -21,6 +21,8 @@ set COPY_OK=%errorlevel%
 copy /y "build\VST3\Release\OrchSynth.vst3\Contents\x86_64-win\faust.dll" "C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\x86_64-win\" >nul
 copy /y "build\VST3\Release\OrchSynth.vst3\Contents\Resources\moduleinfo.json" "C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\Resources\" >nul
 if exist "build\VST3\Release\OrchSynth.vst3\PlugIn.ico" copy /y "build\VST3\Release\OrchSynth.vst3\PlugIn.ico" "C:\Program Files\Common Files\VST3\OrchSynth.vst3\" >nul
+copy /y "LICENSE.txt" "C:\Program Files\Common Files\VST3\OrchSynth.vst3\" >nul
+copy /y "THIRD_PARTY_LICENSES.txt" "C:\Program Files\Common Files\VST3\OrchSynth.vst3\" >nul
 
 :: Copy standard Faust libraries (.lib) required for JIT compilation
 if not exist "C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\x86_64-win\faust" mkdir "C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\x86_64-win\faust" 2>nul

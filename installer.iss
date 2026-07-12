@@ -20,6 +20,8 @@ Source: "build\VST3\Release\OrchSynth.vst3\Contents\x86_64-win\OrchSynth.vst3"; 
 Source: "build\VST3\Release\OrchSynth.vst3\Contents\x86_64-win\faust.dll"; DestDir: "{commoncf64}\VST3\OrchSynth.vst3\Contents\x86_64-win"
 Source: "build\VST3\Release\OrchSynth.vst3\Contents\Resources\moduleinfo.json"; DestDir: "{commoncf64}\VST3\OrchSynth.vst3\Contents\Resources"
 Source: "build\VST3\Release\OrchSynth.vst3\PlugIn.ico"; DestDir: "{commoncf64}\VST3\OrchSynth.vst3"
+Source: "LICENSE.txt"; DestDir: "{commoncf64}\VST3\OrchSynth.vst3"
+Source: "THIRD_PARTY_LICENSES.txt"; DestDir: "{commoncf64}\VST3\OrchSynth.vst3"
 
 [Icons]
 Name: "{group}\Uninstall OrchSynth"; Filename: "{uninstallexe}"

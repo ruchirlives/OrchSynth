@@ -124,6 +124,18 @@ add_custom_command(TARGET OrchSynth PRE_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${FAUST_DIR}/lib/faust.dll"
         "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/Contents/x86_64-win/faust.dll"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
+        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+        "${CMAKE_BINARY_DIR}/VST3/Debug/OrchSynth.vst3/LICENSE.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.txt"
+        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/THIRD_PARTY_LICENSES.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt"
+        "${CMAKE_BINARY_DIR}/VST3/Release/OrchSynth.vst3/LICENSE.txt"
 #    COMMAND ${CMAKE_COMMAND} -E make_directory
 #        "${CMAKE_BINARY_DIR}/bin/Debug/faust"
 #    COMMAND ${CMAKE_COMMAND} -E copy_directory
