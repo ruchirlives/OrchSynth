@@ -15,8 +15,68 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #include <limits.h>
 #endif
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 
 namespace OrchFaust {
+
+namespace {
+constexpr std::uint32_t kStateMagic = 0x4F534654; // "OSFT"
+constexpr std::uint32_t kStateVersion = 1;
+
+template <typename T>
+bool writeValue(Steinberg::IBStream* stream, const T& value) {
+    Steinberg::int32 bytesWritten = 0;
+    return stream &&
+        stream->write((void*)&value, static_cast<Steinberg::int32>(sizeof(T)), &bytesWritten) == Steinberg::kResultOk &&
+        bytesWritten == static_cast<Steinberg::int32>(sizeof(T));
+}
+
+template <typename T>
+bool readValue(Steinberg::IBStream* stream, T& value) {
+    Steinberg::int32 bytesRead = 0;
+    return stream &&
+        stream->read(&value, static_cast<Steinberg::int32>(sizeof(T)), &bytesRead) == Steinberg::kResultOk &&
+        bytesRead == static_cast<Steinberg::int32>(sizeof(T));
+}
+
+bool writeString(Steinberg::IBStream* stream, const std::string& value) {
+    if (value.size() > static_cast<size_t>((std::numeric_limits<std::uint32_t>::max)())) {
+        return false;
+    }
+
+    const auto length = static_cast<std::uint32_t>(value.size());
+    if (!writeValue(stream, length)) {
+        return false;
+    }
+
+    if (length == 0) {
+        return true;
+    }
+
+    Steinberg::int32 bytesWritten = 0;
+    return stream->write((void*)value.data(), static_cast<Steinberg::int32>(length), &bytesWritten) == Steinberg::kResultOk &&
+        bytesWritten == static_cast<Steinberg::int32>(length);
+}
+
+bool readString(Steinberg::IBStream* stream, std::string& value) {
+    std::uint32_t length = 0;
+    if (!readValue(stream, length)) {
+        return false;
+    }
+
+    value.clear();
+    if (length == 0) {
+        return true;
+    }
+
+    value.resize(length);
+    Steinberg::int32 bytesRead = 0;
+    return stream->read(value.data(), static_cast<Steinberg::int32>(length), &bytesRead) == Steinberg::kResultOk &&
+        bytesRead == static_cast<Steinberg::int32>(length);
+}
+}
 
 static std::string getDllDir() {
 #ifdef _WIN32
@@ -308,6 +368,71 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::notify(Steinberg::Vst::IMessag
     }
     
     return Steinberg::Vst::AudioEffect::notify(message);
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustProcessor::getState(Steinberg::IBStream* state) {
+    if (!state) {
+        return Steinberg::kResultFalse;
+    }
+
+    if (!writeValue(state, kStateMagic) ||
+        !writeValue(state, kStateVersion) ||
+        !writeString(state, currentGraphJson) ||
+        !writeValue(state, currentAftertouch) ||
+        !writeValue(state, currentPitchBend)) {
+        return Steinberg::kResultFalse;
+    }
+
+    for (float value : currentCcValues) {
+        if (!writeValue(state, value)) {
+            return Steinberg::kResultFalse;
+        }
+    }
+
+    return Steinberg::kResultOk;
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustProcessor::setState(Steinberg::IBStream* state) {
+    if (!state) {
+        return Steinberg::kResultFalse;
+    }
+
+    std::uint32_t magic = 0;
+    std::uint32_t version = 0;
+    std::string graphJson;
+    float aftertouch = 0.0f;
+    float pitchBend = 0.0f;
+    float ccValues[128] = {};
+
+    if (!readValue(state, magic) ||
+        !readValue(state, version) ||
+        magic != kStateMagic ||
+        version != kStateVersion ||
+        !readString(state, graphJson) ||
+        !readValue(state, aftertouch) ||
+        !readValue(state, pitchBend)) {
+        return Steinberg::kResultFalse;
+    }
+
+    for (float& value : ccValues) {
+        if (!readValue(state, value)) {
+            return Steinberg::kResultFalse;
+        }
+    }
+
+    currentGraphJson = graphJson;
+    currentAftertouch = std::clamp(aftertouch, 0.0f, 1.0f);
+    currentPitchBend = std::clamp(pitchBend, -1.0f, 1.0f);
+    for (int cc = 0; cc < 128; ++cc) {
+        currentCcValues[cc] = std::clamp(ccValues[cc], 0.0f, 1.0f);
+    }
+
+    applyCurrentMidiControls();
+    if (!currentGraphJson.empty()) {
+        processCompile();
+    }
+
+    return Steinberg::kResultOk;
 }
 
 } // namespace OrchFaust
