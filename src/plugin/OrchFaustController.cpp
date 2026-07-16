@@ -1,12 +1,15 @@
 #include "OrchFaustController.h"
+#include "OrchVstGuiEditor.h"
 #include "public.sdk/source/common/pluginview.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "ip/UdpSocket.h"
 #include <nlohmann/json.hpp>
+#if defined(_WIN32)
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#endif
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -109,6 +112,7 @@ const char* PRESET_PLUCK = R"({
   "output": "gain1"
 })";
 
+#if defined(_WIN32)
 static std::filesystem::path getPresetsDir() {
     const char* home = std::getenv("HOME");
     if (home) {
@@ -134,7 +138,7 @@ static std::filesystem::path getPresetsDir() {
     return "";
 }
 
-class OrchFaustEditorView : public Steinberg::CPluginView {
+class OrchFaustEditorView : public Steinberg::CPluginView, public OrchEditorView {
 public:
     OrchFaustEditorView(OrchFaustController* controller) 
         : CPluginView(nullptr), controller(controller)
@@ -814,6 +818,7 @@ private:
         return DefWindowProc(hWnd, uMsg, wParam, lParam);
     }
 };
+#endif
 
 OrchFaustController::OrchFaustController() {}
 
@@ -833,12 +838,12 @@ Steinberg::tresult PLUGIN_API OrchFaustController::terminate() {
 
 Steinberg::IPlugView* PLUGIN_API OrchFaustController::createView(Steinberg::FIDString name) {
     if (strcmp(name, Steinberg::Vst::ViewType::kEditor) == 0) {
-        return new OrchFaustEditorView(this);
+        return new OrchVstGuiEditor(this);
     }
     return nullptr;
 }
 
-void OrchFaustController::requestPortFromProcessor(OrchFaustEditorView* view) {
+void OrchFaustController::requestPortFromProcessor(OrchEditorView* view) {
     activeView = view;
     if (auto* msg = allocateMessage()) {
         msg->setMessageID("GetOscServerPort");

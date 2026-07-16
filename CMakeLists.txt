@@ -59,6 +59,8 @@ set(SOURCE_FILES
     src/plugin/OrchFaustProcessor.cpp
     src/plugin/OrchFaustController.h
     src/plugin/OrchFaustController.cpp
+    src/plugin/OrchVstGuiEditor.h
+    src/plugin/OrchVstGuiEditor.cpp
     src/plugin/OrchFaustEntry.cpp
     src/dsp/FaustEngine.h
     src/dsp/FaustEngine.cpp
@@ -78,6 +80,14 @@ set(SOURCE_FILES
     src/util/LockFreeQueue.h
     src/util/Logging.h
 )
+
+if(WIN32)
+    list(APPEND SOURCE_FILES ${vst3sdk_SOURCE_DIR}/public.sdk/source/main/dllmain.cpp)
+elseif(APPLE)
+    list(APPEND SOURCE_FILES ${vst3sdk_SOURCE_DIR}/public.sdk/source/main/macmain.cpp)
+elseif(UNIX)
+    list(APPEND SOURCE_FILES ${vst3sdk_SOURCE_DIR}/public.sdk/source/main/linuxmain.cpp)
+endif()
 
 # VST3 Plugin Definition using Steinberg's macro
 smtg_add_vst3plugin(OrchSynth
