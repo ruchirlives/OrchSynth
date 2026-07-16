@@ -20,6 +20,7 @@ public:
 
     bool PLUGIN_API open(void* parent, const VSTGUI::PlatformType& platformType) override;
     void PLUGIN_API close() override;
+    VSTGUI::CMessageResult notify(VSTGUI::CBaseObject* sender, const char* message) override;
 
     void valueChanged(VSTGUI::CControl* control) override;
     void updatePortLabel(int port) override;
@@ -28,6 +29,7 @@ public:
 
 private:
     void rebuild();
+    void requestInitialState();
     void loadPresets();
     void loadSelectedPreset();
     void playTestNote();

@@ -8,6 +8,7 @@
 #include "vstgui/lib/cgradient.h"
 #include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/cviewcontainer.h"
+#include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/lib/controls/cbuttons.h"
 #include "vstgui/lib/controls/coptionmenu.h"
 #include "vstgui/lib/controls/ctextlabel.h"
@@ -229,7 +230,6 @@ struct OrchVstGuiEditor::Impl {
     explicit Impl(OrchFaustController* controller) : controller(controller) {}
 
     OrchFaustController* controller = nullptr;
-    VSTGUI::CFrame* frame = nullptr;
     VSTGUI::CViewContainer* root = nullptr;
     VSTGUI::CViewContainer* dialPanel = nullptr;
     VSTGUI::CTextLabel* portLabel = nullptr;
@@ -240,6 +240,7 @@ struct OrchVstGuiEditor::Impl {
     std::vector<std::filesystem::path> presetPaths;
     std::vector<std::string> dialKeys;
     std::vector<std::tuple<std::string, std::string, float>> pendingLayout;
+    bool requestedInitialState = false;
 };
 
 OrchVstGuiEditor::OrchVstGuiEditor(OrchFaustController* controller)
@@ -253,19 +254,15 @@ OrchVstGuiEditor::~OrchVstGuiEditor() {
 }
 
 bool PLUGIN_API OrchVstGuiEditor::open(void* parent, const VSTGUI::PlatformType& platformType) {
-    impl->frame = new VSTGUI::CFrame(VSTGUI::CRect(0, 0, 500, 390), this);
-    if (!impl->frame->open(parent, platformType)) {
-        impl->frame->forget();
-        impl->frame = nullptr;
+    frame = new VSTGUI::CFrame(VSTGUI::CRect(0, 0, 500, 390), this);
+    if (!frame->open(parent, platformType)) {
+        frame->forget();
+        frame = nullptr;
         return false;
     }
     rebuild();
     loadPresets();
-    if (impl->controller) {
-        impl->controller->requestPortFromProcessor(this);
-        impl->controller->requestCurrentPatchName();
-        impl->controller->requestDialLayout();
-    }
+    impl->requestedInitialState = false;
     return true;
 }
 
@@ -279,17 +276,25 @@ void PLUGIN_API OrchVstGuiEditor::close() {
     impl->currentPatchLabel = nullptr;
     impl->presetCountLabel = nullptr;
     impl->presetMenu = nullptr;
-    if (impl->frame) {
-        impl->frame->close();
-        impl->frame = nullptr;
+    if (frame) {
+        frame->close();
+        frame = nullptr;
     }
+}
+
+VSTGUI::CMessageResult OrchVstGuiEditor::notify(VSTGUI::CBaseObject* sender, const char* message) {
+    if (message == VSTGUI::CVSTGUITimer::kMsgTimer && !impl->requestedInitialState) {
+        impl->requestedInitialState = true;
+        requestInitialState();
+    }
+    return VSTGUIEditor::notify(sender, message);
 }
 
 void OrchVstGuiEditor::rebuild() {
     auto* root = new VSTGUI::CViewContainer(VSTGUI::CRect(0, 0, 500, 390));
     root->setBackgroundColor(kBg);
     impl->root = root;
-    impl->frame->addView(root);
+    frame->addView(root);
 
     auto* header = new StyledPanel(VSTGUI::CRect(20, 12, 480, 76), kPanel2, VSTGUI::CColor(28, 36, 50), 10.0);
     root->addView(header);
@@ -332,6 +337,15 @@ void OrchVstGuiEditor::rebuild() {
     impl->portLabel = makeLabel(VSTGUI::CRect(226, 9, 390, 29), "Editor Port: 9020", kAccent);
     impl->portLabel->setFont(VSTGUI::kNormalFontSmall);
     editorPanel->addView(impl->portLabel);
+}
+
+void OrchVstGuiEditor::requestInitialState() {
+    if (!impl->controller) {
+        return;
+    }
+    impl->controller->requestPortFromProcessor(this);
+    impl->controller->requestCurrentPatchName();
+    impl->controller->requestDialLayout();
 }
 
 void OrchVstGuiEditor::loadPresets() {
