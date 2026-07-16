@@ -84,6 +84,9 @@ Node parseNodeJson(const json& jNode) {
     Node node;
     node.id = jNode["id"].get<std::string>();
     node.type = jNode["type"].get<std::string>();
+    if (jNode.contains("name") && jNode["name"].is_string()) {
+        node.name = jNode["name"].get<std::string>();
+    }
     if (jNode.contains("x") && jNode["x"].is_number() &&
         jNode.contains("y") && jNode["y"].is_number()) {
         node.x = jNode["x"].get<float>();

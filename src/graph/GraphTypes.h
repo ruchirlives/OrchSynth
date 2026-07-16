@@ -12,6 +12,7 @@ struct GroupDefinition;
 struct Node {
     std::string id;
     std::string type;
+    std::string name;
     float x = 0.0f;
     float y = 0.0f;
     bool hasPosition = false;

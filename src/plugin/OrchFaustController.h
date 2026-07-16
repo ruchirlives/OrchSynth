@@ -1,6 +1,7 @@
 #pragma once
 
 #include "public.sdk/source/vst/vsteditcontroller.h"
+#include <string>
 
 namespace OrchFaust {
 
@@ -20,11 +21,16 @@ public:
     Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) override;
 
     void requestPortFromProcessor(class OrchFaustEditorView* view);
+    void requestCurrentPatchName();
+    void requestDialLayout();
+    void setCurrentPatchName(std::string name);
+    void setVstDial(const std::string& key, float value);
     void clearActiveView() { activeView = nullptr; }
     int getActivePort() const { return activePort; }
 
 private:
     int activePort = 9020;
+    std::string currentPatchName = "Default Poly Sine";
     class OrchFaustEditorView* activeView = nullptr;
 };
 

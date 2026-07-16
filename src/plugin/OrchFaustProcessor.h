@@ -5,6 +5,8 @@
 #include "dsp/VoiceManager.h"
 #include "osc/OscServer.h"
 #include "osc/OscCommandQueue.h"
+#include <map>
+#include <vector>
 
 // Forward declaration of Faust compiler types
 class llvm_dsp_factory;
@@ -35,8 +37,10 @@ public:
 
 private:
     void handleMidiEvents(Steinberg::Vst::IEventList* eventList);
-    void applyCurrentMidiControls();
+    void applyCurrentControls();
     void checkAndApplyOscCommands();
+    void notifyPatchNameChanged();
+    void notifyDialLayoutChanged();
 
     VoiceManager voiceManager;
     OscCommandQueue commandQueue;
@@ -47,9 +51,12 @@ private:
     
     // Store current graph state
     std::string currentGraphJson;
+    std::string currentPatchName = "Default Poly Sine";
     float currentAftertouch = 0.0f;
     float currentPitchBend = 0.0f;
     float currentCcValues[128] = {};
+    std::map<std::string, float> currentVstDialValues;
+    std::vector<std::pair<std::string, std::string>> currentVstDialLayout;
 
     // Compiler helper
     void processLoadGraph(const std::string& jsonStr);

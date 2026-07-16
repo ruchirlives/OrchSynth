@@ -276,6 +276,11 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     for (int cc = 0; cc < 128; ++cc) {
         ss << "cc_" << cc << " = hslider(\"cc_" << cc << "\", 0, 0, 1, 0.01);\n";
     }
+    for (const auto& node : workingGraph.nodes) {
+        if (node.type == "vst_dial") {
+            ss << "vst_dial_" << node.id << " = hslider(\"vst_dial_" << node.id << "\", 0, 0, 1, 0.001);\n";
+        }
+    }
     ss << "\n";
     
     // Map of nodes for quick lookup
@@ -453,6 +458,9 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                 ccNumber = std::clamp(static_cast<int>(node.params.at("cc")), 0, 127);
             }
             ss << "cc_" << ccNumber << " * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "vst_dial") {
+            ss << "vst_dial_" << nodeId << " * " << getParamExpr("scale", "1.0");
         }
         else if (node.type == "gain") {
             std::string gainExpr = getParamExpr("gain", "voice_gain");

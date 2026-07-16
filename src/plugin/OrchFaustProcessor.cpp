@@ -18,12 +18,14 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <utility>
+#include <vector>
 
 namespace OrchFaust {
 
 namespace {
 constexpr std::uint32_t kStateMagic = 0x4F534654; // "OSFT"
-constexpr std::uint32_t kStateVersion = 1;
+constexpr std::uint32_t kStateVersion = 3;
 
 template <typename T>
 bool writeValue(Steinberg::IBStream* stream, const T& value) {
@@ -75,6 +77,16 @@ bool readString(Steinberg::IBStream* stream, std::string& value) {
     Steinberg::int32 bytesRead = 0;
     return stream->read(value.data(), static_cast<Steinberg::int32>(length), &bytesRead) == Steinberg::kResultOk &&
         bytesRead == static_cast<Steinberg::int32>(length);
+}
+
+std::vector<Steinberg::Vst::TChar> toTCharString(const std::string& value) {
+    std::vector<Steinberg::Vst::TChar> result;
+    result.reserve(value.size() + 1);
+    for (unsigned char ch : value) {
+        result.push_back(static_cast<Steinberg::Vst::TChar>(ch));
+    }
+    result.push_back(0);
+    return result;
 }
 }
 
@@ -193,7 +205,7 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::Proces
     }
     if (newFactory) {
         voiceManager.updateFactory(newFactory);
-        applyCurrentMidiControls();
+        applyCurrentControls();
     }
 
     // 3. Process incoming VST3 MIDI events
@@ -262,6 +274,17 @@ void OrchFaustProcessor::processCompile() {
         Logger::logError("Processor: Graph validation failed: ", err);
         return;
     }
+    currentPatchName = optGraph->name.empty() ? "Untitled Patch" : optGraph->name;
+    currentVstDialLayout.clear();
+    for (const auto& node : optGraph->nodes) {
+        if (node.type == "vst_dial") {
+            const std::string label = node.name.empty() ? node.id : node.name;
+            currentVstDialLayout.emplace_back(node.id, label);
+            if (currentVstDialValues.find(node.id) == currentVstDialValues.end()) {
+                currentVstDialValues[node.id] = 0.0f;
+            }
+        }
+    }
     
     std::string dspCode = FaustGraphCompiler::compile(*optGraph, err);
     if (dspCode.empty()) {
@@ -303,6 +326,8 @@ void OrchFaustProcessor::processCompile() {
         deleteDSPFactory(newFactory);
     } else {
         Logger::logInfo("Processor: Sent compiled factory to audio thread.");
+        notifyPatchNameChanged();
+        notifyDialLayoutChanged();
     }
 }
 
@@ -313,8 +338,8 @@ void OrchFaustProcessor::handleMidiEvents(Steinberg::Vst::IEventList* eventList)
         if (eventList->getEvent(i, e) == Steinberg::kResultOk) {
             switch (e.type) {
                 case Steinberg::Vst::Event::kNoteOnEvent:
-                    voiceManager.noteOn(static_cast<int>(e.noteOn.pitch), e.noteOn.velocity);
-                    applyCurrentMidiControls();
+                voiceManager.noteOn(static_cast<int>(e.noteOn.pitch), e.noteOn.velocity);
+                    applyCurrentControls();
                     break;
                 case Steinberg::Vst::Event::kNoteOffEvent:
                     voiceManager.noteOff(static_cast<int>(e.noteOff.pitch));
@@ -345,11 +370,14 @@ void OrchFaustProcessor::handleMidiEvents(Steinberg::Vst::IEventList* eventList)
     }
 }
 
-void OrchFaustProcessor::applyCurrentMidiControls() {
+void OrchFaustProcessor::applyCurrentControls() {
     voiceManager.setGlobalControl("aftertouch", currentAftertouch);
     voiceManager.setGlobalControl("pitch_bend", currentPitchBend);
     for (int cc = 0; cc < 128; ++cc) {
         voiceManager.setGlobalControl("cc_" + std::to_string(cc), currentCcValues[cc]);
+    }
+    for (const auto& [key, value] : currentVstDialValues) {
+        voiceManager.setGlobalControl("vst_dial_" + key, value);
     }
 }
 
@@ -366,8 +394,64 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::notify(Steinberg::Vst::IMessag
         }
         return Steinberg::kResultOk;
     }
+
+    if (strcmp(message->getMessageID(), "GetCurrentPatchName") == 0) {
+        notifyPatchNameChanged();
+        return Steinberg::kResultOk;
+    }
+
+    if (strcmp(message->getMessageID(), "GetVstDialLayout") == 0) {
+        notifyDialLayoutChanged();
+        return Steinberg::kResultOk;
+    }
+
+    if (strcmp(message->getMessageID(), "SetVstDial") == 0) {
+        Steinberg::Vst::TChar keyChars[256] = {};
+        double value = 0.0;
+        if (message->getAttributes()->getString("key", keyChars, sizeof(keyChars)) == Steinberg::kResultOk &&
+            message->getAttributes()->getFloat("value", value) == Steinberg::kResultOk) {
+            std::string key;
+            for (auto* ch = keyChars; *ch; ++ch) {
+                key.push_back(static_cast<char>(*ch));
+            }
+            if (!key.empty()) {
+                const float clamped = std::clamp(static_cast<float>(value), 0.0f, 1.0f);
+                currentVstDialValues[key] = clamped;
+                voiceManager.setGlobalControl("vst_dial_" + key, clamped);
+            }
+        }
+        return Steinberg::kResultOk;
+    }
     
     return Steinberg::Vst::AudioEffect::notify(message);
+}
+
+void OrchFaustProcessor::notifyPatchNameChanged() {
+    if (auto* reply = allocateMessage()) {
+        reply->setMessageID("CurrentPatchName");
+        auto patchName = toTCharString(currentPatchName);
+        reply->getAttributes()->setString("name", patchName.data());
+        sendMessage(reply);
+    }
+}
+
+void OrchFaustProcessor::notifyDialLayoutChanged() {
+    if (auto* reply = allocateMessage()) {
+        reply->setMessageID("VstDialLayout");
+        std::string layout;
+        for (const auto& [key, label] : currentVstDialLayout) {
+            layout += key;
+            layout += '\t';
+            layout += label;
+            layout += '\t';
+            auto valueIt = currentVstDialValues.find(key);
+            layout += std::to_string(valueIt == currentVstDialValues.end() ? 0.0f : valueIt->second);
+            layout += '\n';
+        }
+        auto layoutText = toTCharString(layout);
+        reply->getAttributes()->setString("layout", layoutText.data());
+        sendMessage(reply);
+    }
 }
 
 Steinberg::tresult PLUGIN_API OrchFaustProcessor::getState(Steinberg::IBStream* state) {
@@ -385,6 +469,16 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::getState(Steinberg::IBStream* 
 
     for (float value : currentCcValues) {
         if (!writeValue(state, value)) {
+            return Steinberg::kResultFalse;
+        }
+    }
+
+    const auto dialCount = static_cast<std::uint32_t>(currentVstDialValues.size());
+    if (!writeValue(state, dialCount)) {
+        return Steinberg::kResultFalse;
+    }
+    for (const auto& [key, value] : currentVstDialValues) {
+        if (!writeString(state, key) || !writeValue(state, value)) {
             return Steinberg::kResultFalse;
         }
     }
@@ -407,7 +501,7 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::setState(Steinberg::IBStream* 
     if (!readValue(state, magic) ||
         !readValue(state, version) ||
         magic != kStateMagic ||
-        version != kStateVersion ||
+        (version < 1 || version > kStateVersion) ||
         !readString(state, graphJson) ||
         !readValue(state, aftertouch) ||
         !readValue(state, pitchBend)) {
@@ -420,16 +514,48 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::setState(Steinberg::IBStream* 
         }
     }
 
+    std::map<std::string, float> vstDialValues;
+    if (version == 2) {
+        for (int dial = 0; dial < 8; ++dial) {
+            float value = 0.0f;
+            if (!readValue(state, value)) {
+                return Steinberg::kResultFalse;
+            }
+            if (value != 0.0f) {
+                vstDialValues[std::to_string(dial)] = std::clamp(value, 0.0f, 1.0f);
+            }
+        }
+    } else if (version >= 3) {
+        std::uint32_t dialCount = 0;
+        if (!readValue(state, dialCount)) {
+            return Steinberg::kResultFalse;
+        }
+        for (std::uint32_t i = 0; i < dialCount; ++i) {
+            std::string key;
+            float value = 0.0f;
+            if (!readString(state, key) || !readValue(state, value)) {
+                return Steinberg::kResultFalse;
+            }
+            if (!key.empty()) {
+                vstDialValues[key] = std::clamp(value, 0.0f, 1.0f);
+            }
+        }
+    }
+
     currentGraphJson = graphJson;
     currentAftertouch = std::clamp(aftertouch, 0.0f, 1.0f);
     currentPitchBend = std::clamp(pitchBend, -1.0f, 1.0f);
     for (int cc = 0; cc < 128; ++cc) {
         currentCcValues[cc] = std::clamp(ccValues[cc], 0.0f, 1.0f);
     }
+    currentVstDialValues = std::move(vstDialValues);
 
-    applyCurrentMidiControls();
+    applyCurrentControls();
     if (!currentGraphJson.empty()) {
         processCompile();
+    } else {
+        currentPatchName = "Default Poly Sine";
+        notifyPatchNameChanged();
     }
 
     return Steinberg::kResultOk;
