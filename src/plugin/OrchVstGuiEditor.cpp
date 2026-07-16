@@ -5,6 +5,8 @@
 #include <nlohmann/json.hpp>
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cframe.h"
+#include "vstgui/lib/cgradient.h"
+#include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/cviewcontainer.h"
 #include "vstgui/lib/controls/cbuttons.h"
 #include "vstgui/lib/controls/coptionmenu.h"
@@ -41,10 +43,11 @@ constexpr int32_t kTagReloadPreset = 1003;
 constexpr int32_t kTagOpenEditor = 1004;
 constexpr int32_t kTagDialBase = 2000;
 
-const VSTGUI::CColor kBg(18, 21, 27);
-const VSTGUI::CColor kPanel(33, 40, 52);
-const VSTGUI::CColor kPanel2(25, 30, 39);
-const VSTGUI::CColor kBorder(74, 88, 112);
+const VSTGUI::CColor kBg(12, 15, 21);
+const VSTGUI::CColor kPanel(27, 34, 46);
+const VSTGUI::CColor kPanel2(20, 25, 35);
+const VSTGUI::CColor kPanelLift(34, 43, 58);
+const VSTGUI::CColor kBorder(54, 69, 90);
 const VSTGUI::CColor kText(240, 246, 255);
 const VSTGUI::CColor kMuted(157, 172, 194);
 const VSTGUI::CColor kAccent(76, 229, 139);
@@ -88,8 +91,8 @@ std::filesystem::path getPresetsDir() {
 
 VSTGUI::CTextLabel* makeLabel(const VSTGUI::CRect& rect, const std::string& text, VSTGUI::CColor color = kText) {
     auto* label = new VSTGUI::CTextLabel(rect, text.c_str());
-    label->setBackColor(kPanel2);
-    label->setFrameColor(kPanel2);
+    label->setBackColor(VSTGUI::CColor(0, 0, 0, 0));
+    label->setFrameColor(VSTGUI::CColor(0, 0, 0, 0));
     label->setFontColor(color);
     return label;
 }
@@ -98,12 +101,38 @@ VSTGUI::CTextButton* makeButton(const VSTGUI::CRect& rect, VSTGUI::IControlListe
     auto* button = new VSTGUI::CTextButton(rect, listener, tag, title.c_str());
     button->setRoundRadius(7.0);
     button->setFrameWidth(1.0);
-    button->setFrameColor(kBorder);
+    button->setFrameColor(VSTGUI::CColor(71, 89, 114));
     button->setFrameColorHighlighted(kAccent);
     button->setTextColor(kText);
     button->setTextColorHighlighted(kText);
+    button->setGradient(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(43, 53, 69), VSTGUI::CColor(30, 38, 52)));
+    button->setGradientHighlighted(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(49, 68, 79), VSTGUI::CColor(27, 77, 61)));
     return button;
 }
+
+class StyledPanel : public VSTGUI::CViewContainer {
+public:
+    StyledPanel(const VSTGUI::CRect& rect, VSTGUI::CColor fill, VSTGUI::CColor stroke, VSTGUI::CCoord radius = 8.0)
+        : CViewContainer(rect), fill(fill), stroke(stroke), radius(radius) {
+        setTransparency(true);
+    }
+
+    void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
+        auto path = VSTGUI::owned(context->createRoundRectGraphicsPath(getViewSize(), radius));
+        context->setFillColor(fill);
+        context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathFilled);
+        context->setFrameColor(stroke);
+        context->setLineWidth(1.0);
+        context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathStroked);
+    }
+
+private:
+    VSTGUI::CColor fill;
+    VSTGUI::CColor stroke;
+    VSTGUI::CCoord radius;
+
+    CLASS_METHODS_NOCOPY(StyledPanel, VSTGUI::CViewContainer)
+};
 
 class GraphDialControl : public VSTGUI::CControl {
 public:
@@ -116,22 +145,22 @@ public:
 
     void draw(VSTGUI::CDrawContext* context) override {
         const auto size = getViewSize();
-        auto knob = VSTGUI::CRect(size.left + 17, size.top + 6, size.left + 75, size.top + 64);
+        auto knob = VSTGUI::CRect(size.left + 19, size.top + 5, size.left + 73, size.top + 59);
         const auto value = std::clamp(getValueNormalized(), 0.0f, 1.0f);
         const auto angle = (-135.0 + value * 270.0) * 3.14159265358979323846 / 180.0;
         const auto cx = (knob.left + knob.right) * 0.5;
         const auto cy = (knob.top + knob.bottom) * 0.5;
         const auto radius = (knob.getWidth() * 0.5) - 7.0;
 
-        context->setFillColor(VSTGUI::CColor(14, 18, 24));
-        context->setFrameColor(kBorder);
+        context->setFillColor(VSTGUI::CColor(10, 13, 19));
+        context->setFrameColor(VSTGUI::CColor(60, 77, 101));
         context->setLineWidth(1.4);
         context->drawEllipse(knob, VSTGUI::kDrawFilledAndStroked);
 
         auto inner = knob;
         inner.inset(7, 7);
-        context->setFillColor(VSTGUI::CColor(43, 53, 68));
-        context->setFrameColor(VSTGUI::CColor(98, 118, 146));
+        context->setFillColor(kPanelLift);
+        context->setFrameColor(VSTGUI::CColor(99, 122, 151));
         context->drawEllipse(inner, VSTGUI::kDrawFilledAndStroked);
 
         VSTGUI::CPoint start(cx, cy);
@@ -142,11 +171,11 @@ public:
 
         context->setFontColor(kText);
         context->setFont(VSTGUI::kNormalFontSmall);
-        context->drawString(label.c_str(), VSTGUI::CRect(size.left, size.top + 68, size.right, size.top + 86), VSTGUI::kCenterText);
+        context->drawString(label.c_str(), VSTGUI::CRect(size.left, size.top + 61, size.right, size.top + 78), VSTGUI::kCenterText);
         context->setFontColor(kMuted);
         char valueText[16] = {};
         snprintf(valueText, sizeof(valueText), "%d%%", static_cast<int>(value * 100.0f + 0.5f));
-        context->drawString(valueText, VSTGUI::CRect(size.left, size.top + 84, size.right, size.top + 100), VSTGUI::kCenterText);
+        context->drawString(valueText, VSTGUI::CRect(size.left, size.top + 76, size.right, size.top + 92), VSTGUI::kCenterText);
         setDirty(false);
     }
 
@@ -179,8 +208,8 @@ public:
 private:
     void setValueFromPoint(const VSTGUI::CPoint& where) {
         const auto size = getViewSize();
-        const auto top = size.top + 6;
-        const auto bottom = size.top + 64;
+        const auto top = size.top + 5;
+        const auto bottom = size.top + 59;
         const auto value = std::clamp(static_cast<float>((bottom - where.y) / (bottom - top)), 0.0f, 1.0f);
         if (value != getValueNormalized()) {
             setValueNormalized(value);
@@ -262,49 +291,45 @@ void OrchVstGuiEditor::rebuild() {
     impl->root = root;
     impl->frame->addView(root);
 
-    auto* header = new VSTGUI::CViewContainer(VSTGUI::CRect(18, 12, 482, 72));
-    header->setBackgroundColor(kPanel2);
+    auto* header = new StyledPanel(VSTGUI::CRect(20, 12, 480, 76), kPanel2, VSTGUI::CColor(28, 36, 50), 10.0);
     root->addView(header);
-    auto* title = makeLabel(VSTGUI::CRect(0, 8, 464, 34), "Orch Synth");
+    auto* title = makeLabel(VSTGUI::CRect(0, 10, 460, 36), "Orch Synth");
     title->setFont(VSTGUI::kNormalFontBig);
     header->addView(title);
-    auto* subtitle = makeLabel(VSTGUI::CRect(0, 36, 464, 54), "VST3 Controller", kMuted);
+    auto* subtitle = makeLabel(VSTGUI::CRect(0, 39, 460, 58), "VST3 Controller", kMuted);
     subtitle->setFont(VSTGUI::kNormalFontSmall);
     header->addView(subtitle);
 
-    root->addView(makeButton(VSTGUI::CRect(28, 94, 226, 130), this, kTagTestNote, "Play C1 Note"));
+    root->addView(makeButton(VSTGUI::CRect(28, 98, 226, 134), this, kTagTestNote, "Play C1 Note"));
 
-    auto* presetPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(18, 140, 482, 222));
-    presetPanel->setBackgroundColor(kPanel);
+    auto* presetPanel = new StyledPanel(VSTGUI::CRect(20, 148, 480, 228), kPanel, kBorder, 8.0);
     root->addView(presetPanel);
-    auto* presetTitle = makeLabel(VSTGUI::CRect(12, 8, 140, 28), "Load Preset");
+    auto* presetTitle = makeLabel(VSTGUI::CRect(14, 9, 132, 29), "Load Preset");
     presetTitle->setFont(VSTGUI::kNormalFontSmall);
     presetPanel->addView(presetTitle);
-    impl->currentPatchLabel = makeLabel(VSTGUI::CRect(152, 8, 440, 28), "Current Patch: Default Poly Sine", kAccent);
+    impl->currentPatchLabel = makeLabel(VSTGUI::CRect(150, 9, 438, 29), "Current Patch: Default Poly Sine", kAccent);
     impl->currentPatchLabel->setFont(VSTGUI::kNormalFontSmall);
     presetPanel->addView(impl->currentPatchLabel);
-    impl->presetMenu = new VSTGUI::COptionMenu(VSTGUI::CRect(12, 38, 318, 62), this, kTagPresetMenu);
-    impl->presetMenu->setBackColor(VSTGUI::CColor(245, 248, 252));
+    impl->presetMenu = new VSTGUI::COptionMenu(VSTGUI::CRect(14, 38, 318, 63), this, kTagPresetMenu);
+    impl->presetMenu->setBackColor(VSTGUI::CColor(236, 242, 250));
     impl->presetMenu->setFrameColor(kBorder);
     impl->presetMenu->setFontColor(VSTGUI::CColor(17, 24, 39));
     presetPanel->addView(impl->presetMenu);
-    presetPanel->addView(makeButton(VSTGUI::CRect(340, 34, 452, 66), this, kTagReloadPreset, "Reload Preset"));
-    impl->presetCountLabel = makeLabel(VSTGUI::CRect(12, 62, 220, 78), "0 presets loaded", kMuted);
+    presetPanel->addView(makeButton(VSTGUI::CRect(340, 34, 448, 66), this, kTagReloadPreset, "Reload Preset"));
+    impl->presetCountLabel = makeLabel(VSTGUI::CRect(14, 61, 220, 75), "0 presets loaded", kMuted);
     impl->presetCountLabel->setFont(VSTGUI::kNormalFontVerySmall);
     presetPanel->addView(impl->presetCountLabel);
 
-    impl->dialPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(18, 232, 482, 328));
-    impl->dialPanel->setBackgroundColor(kPanel);
+    impl->dialPanel = new StyledPanel(VSTGUI::CRect(20, 240, 480, 332), kPanel, kBorder, 8.0);
     root->addView(impl->dialPanel);
-    auto* dialTitle = makeLabel(VSTGUI::CRect(12, 8, 140, 28), "Graph Dials");
+    auto* dialTitle = makeLabel(VSTGUI::CRect(14, 9, 140, 29), "Graph Dials");
     dialTitle->setFont(VSTGUI::kNormalFontSmall);
     impl->dialPanel->addView(dialTitle);
 
-    auto* editorPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(18, 338, 482, 378));
-    editorPanel->setBackgroundColor(kPanel);
+    auto* editorPanel = new StyledPanel(VSTGUI::CRect(20, 342, 480, 378), kPanel, kBorder, 8.0);
     root->addView(editorPanel);
-    editorPanel->addView(makeButton(VSTGUI::CRect(12, 6, 210, 34), this, kTagOpenEditor, "Open Web Editor"));
-    impl->portLabel = makeLabel(VSTGUI::CRect(224, 10, 390, 30), "Editor Port: 9020", kAccent);
+    editorPanel->addView(makeButton(VSTGUI::CRect(14, 5, 210, 31), this, kTagOpenEditor, "Open Web Editor"));
+    impl->portLabel = makeLabel(VSTGUI::CRect(226, 9, 390, 29), "Editor Port: 9020", kAccent);
     impl->portLabel->setFont(VSTGUI::kNormalFontSmall);
     editorPanel->addView(impl->portLabel);
 }
@@ -383,7 +408,7 @@ void OrchVstGuiEditor::updateDialLayout(const std::vector<std::tuple<std::string
         return;
     }
     impl->dialPanel->removeAll();
-    auto* dialTitle = makeLabel(VSTGUI::CRect(12, 8, 140, 28), "Graph Dials");
+    auto* dialTitle = makeLabel(VSTGUI::CRect(14, 9, 140, 29), "Graph Dials");
     dialTitle->setFont(VSTGUI::kNormalFontSmall);
     impl->dialPanel->addView(dialTitle);
     impl->dialKeys.clear();
@@ -393,10 +418,10 @@ void OrchVstGuiEditor::updateDialLayout(const std::vector<std::tuple<std::string
         if (visibleIndex >= 4) {
             break;
         }
-        const auto x = 18.0 + visibleIndex * 108.0;
-        const auto y = 30.0;
+        const auto x = 16.0 + visibleIndex * 108.0;
+        const auto y = 31.0;
         impl->dialKeys.push_back(key);
-        impl->dialPanel->addView(new GraphDialControl(VSTGUI::CRect(x, y, x + 92, y + 92), this, kTagDialBase + visibleIndex, label.empty() ? key : label, value));
+        impl->dialPanel->addView(new GraphDialControl(VSTGUI::CRect(x, y, x + 92, y + 90), this, kTagDialBase + visibleIndex, label.empty() ? key : label, value));
         ++visibleIndex;
     }
     impl->dialPanel->invalid();
