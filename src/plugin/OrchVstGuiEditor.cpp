@@ -4,6 +4,8 @@
 #include "osc/OscOutboundPacketStream.h"
 #include <nlohmann/json.hpp>
 #include "vstgui/lib/cdrawcontext.h"
+#include "vstgui/lib/cbitmap.h"
+#include "vstgui/lib/cfont.h"
 #include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cgradient.h"
 #include "vstgui/lib/cgraphicspath.h"
@@ -14,6 +16,7 @@
 #include "vstgui/lib/controls/ctextlabel.h"
 
 #if defined(_WIN32)
+#include "vstgui/lib/platform/win32/win32factory.h"
 #include <shlobj.h>
 #include <windows.h>
 #include <shellapi.h>
@@ -25,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <utility>
 
@@ -42,16 +46,24 @@ constexpr int32_t kTagTestNote = 1001;
 constexpr int32_t kTagPresetMenu = 1002;
 constexpr int32_t kTagReloadPreset = 1003;
 constexpr int32_t kTagOpenEditor = 1004;
+constexpr int32_t kTagRefreshState = 1005;
 constexpr int32_t kTagDialBase = 2000;
+constexpr Steinberg::int32 kEditorWidth = 540;
+constexpr Steinberg::int32 kEditorHeight = 430;
+// Coordinates are in the backing-plate pixel space (the skin is 540x430).
+// Set ORCH_GUI_CALIBRATION=1 while tuning the skin/control alignment.
+constexpr VSTGUI::CCoord kLeftRailCenterX = 79.0;
+constexpr VSTGUI::CCoord kRightRailCenterX = 462.0;
 
-const VSTGUI::CColor kBg(12, 15, 21);
-const VSTGUI::CColor kPanel(27, 34, 46);
-const VSTGUI::CColor kPanel2(20, 25, 35);
-const VSTGUI::CColor kPanelLift(34, 43, 58);
-const VSTGUI::CColor kBorder(54, 69, 90);
-const VSTGUI::CColor kText(240, 246, 255);
-const VSTGUI::CColor kMuted(157, 172, 194);
-const VSTGUI::CColor kAccent(76, 229, 139);
+const VSTGUI::CColor kBg(8, 9, 10);
+const VSTGUI::CColor kPanel(28, 29, 28);
+const VSTGUI::CColor kPanel2(18, 19, 18);
+const VSTGUI::CColor kPanelLift(39, 40, 38);
+const VSTGUI::CColor kBorder(62, 65, 61);
+const VSTGUI::CColor kText(226, 229, 220);
+const VSTGUI::CColor kMuted(143, 149, 139);
+const VSTGUI::CColor kAccent(151, 233, 91);
+const VSTGUI::CColor kRackLine(48, 50, 46);
 
 std::string graphJsonWithPresetName(const std::string& jsonGraph, const std::string& presetName) {
     if (jsonGraph.empty() || presetName.empty()) {
@@ -98,18 +110,176 @@ VSTGUI::CTextLabel* makeLabel(const VSTGUI::CRect& rect, const std::string& text
     return label;
 }
 
-VSTGUI::CTextButton* makeButton(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener, int32_t tag, const std::string& title) {
+VSTGUI::CTextButton* makeButton(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener, int32_t tag,
+                                const std::string& title, VSTGUI::CCoord fontSize = 0.0) {
     auto* button = new VSTGUI::CTextButton(rect, listener, tag, title.c_str());
-    button->setRoundRadius(7.0);
-    button->setFrameWidth(1.0);
-    button->setFrameColor(VSTGUI::CColor(71, 89, 114));
-    button->setFrameColorHighlighted(kAccent);
+    // The skin supplies the button surfaces; this control is only the hit target and label.
+    button->setRoundRadius(0.0);
+    button->setFrameWidth(0.0);
+    button->setFrameColor(VSTGUI::CColor(0, 0, 0, 0));
+    button->setFrameColorHighlighted(VSTGUI::CColor(0, 0, 0, 0));
     button->setTextColor(kText);
     button->setTextColorHighlighted(kText);
-    button->setGradient(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(43, 53, 69), VSTGUI::CColor(30, 38, 52)));
-    button->setGradientHighlighted(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(49, 68, 79), VSTGUI::CColor(27, 77, 61)));
+    button->setGradient(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(0, 0, 0, 0), VSTGUI::CColor(0, 0, 0, 0)));
+    button->setGradientHighlighted(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(0, 0, 0, 0), VSTGUI::CColor(0, 0, 0, 0)));
+    if (fontSize > 0.0) {
+        auto font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("Arial", fontSize);
+        button->setFont(font.get());
+    }
     return button;
 }
+
+std::string guiAssetPath(const std::string& filename) {
+    std::string dir;
+#if defined(_WIN32)
+    HMODULE module = nullptr;
+    GetModuleHandleExA(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(&guiAssetPath),
+        &module);
+    char path[MAX_PATH] = {};
+    if (module && GetModuleFileNameA(module, path, MAX_PATH) > 0) {
+        dir = path;
+        const auto slash = dir.find_last_of("\\/");
+        if (slash != std::string::npos) {
+            dir = dir.substr(0, slash);
+        }
+    }
+#else
+    dir = ".";
+#endif
+#if defined(_WIN32)
+    return dir + "\\gui\\" + filename;
+#else
+    return dir + "/gui/" + filename;
+#endif
+}
+
+VSTGUI::SharedPointer<VSTGUI::CBitmap> loadGuiBitmap(const std::string& filename) {
+    static std::map<std::string, std::string> assetPathCache;
+#if defined(_WIN32)
+    // VSTGUI resolves string resources relative to the platform factory base path.
+    // Configure it once so assets can remain alongside the VST3 binary in gui/.
+    static const bool resourceBasePathConfigured = [] {
+        auto* factory = VSTGUI::getPlatformFactory().asWin32Factory();
+        if (factory) {
+            factory->setResourceBasePath(guiAssetPath("" ).c_str());
+        }
+        return factory != nullptr;
+    }();
+    (void)resourceBasePathConfigured;
+#endif
+    auto [it, inserted] = assetPathCache.emplace(filename, filename);
+    auto* bitmap = new VSTGUI::CBitmap(VSTGUI::CResourceDescription(it->second.c_str()));
+    if (!bitmap->isLoaded()) {
+        bitmap->forget();
+        return nullptr;
+    }
+    return VSTGUI::SharedPointer<VSTGUI::CBitmap>(bitmap);
+}
+
+json loadGuiLayout() {
+    try {
+        std::ifstream file(guiAssetPath("orch_gui_layout.json"));
+        if (file.is_open()) {
+            return json::parse(file);
+        }
+    } catch (...) {
+    }
+    return json::object();
+}
+
+// Layout JSON uses backing-plate coordinates. Containers are an implementation
+// detail, so convert from the shared 540x430 canvas into each child view's
+// local coordinate space at the point of use.
+VSTGUI::CRect layoutRect(const json& layout, const char* collection, const char* name, const VSTGUI::CRect& fallback) {
+    try {
+        const auto collectionIt = layout.find(collection);
+        if (collectionIt == layout.end() || !collectionIt->is_object()) {
+            return fallback;
+        }
+        const auto itemIt = collectionIt->find(name);
+        if (itemIt == collectionIt->end() || !itemIt->is_object()) {
+            return fallback;
+        }
+        const auto& item = *itemIt;
+        const auto x = item.value("x", static_cast<double>(fallback.left));
+        const auto y = item.value("y", static_cast<double>(fallback.top));
+        const auto width = item.value("w", static_cast<double>(fallback.getWidth()));
+        const auto height = item.value("h", static_cast<double>(fallback.getHeight()));
+        return VSTGUI::CRect(x, y, x + width, y + height);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+VSTGUI::CRect layoutRectInParent(const json& layout, const char* collection, const char* name,
+                                 const VSTGUI::CRect& absoluteFallback, const VSTGUI::CRect& parentBounds) {
+    const auto absolute = layoutRect(layout, collection, name, absoluteFallback);
+    return VSTGUI::CRect(
+        absolute.left - parentBounds.left,
+        absolute.top - parentBounds.top,
+        absolute.right - parentBounds.left,
+        absolute.bottom - parentBounds.top);
+}
+
+VSTGUI::CRect layoutGroupBounds(const json& layout, const char* name, const VSTGUI::CRect& absoluteFallback,
+                                const VSTGUI::CRect& parentBounds) {
+    const auto bounds = layoutRect(layout, "groups", name, absoluteFallback);
+    try {
+        const auto groupsIt = layout.find("groups");
+        if (groupsIt == layout.end() || !groupsIt->is_object()) {
+            return bounds;
+        }
+        const auto groupIt = groupsIt->find(name);
+        if (groupIt == groupsIt->end() || !groupIt->is_object() || !groupIt->contains("parent")) {
+            return bounds;
+        }
+        // Earlier positioner versions persisted child-panel coordinates relative
+        // to their rail. Accept that form as well as the current absolute form.
+        if (bounds.left < parentBounds.left) {
+            return VSTGUI::CRect(bounds.left + parentBounds.left, bounds.top + parentBounds.top,
+                                 bounds.right + parentBounds.left, bounds.bottom + parentBounds.top);
+        }
+    } catch (...) {
+    }
+    return bounds;
+}
+
+VSTGUI::CCoord layoutFontSize(const json& layout, const char* name, VSTGUI::CCoord fallback) {
+    try {
+        const auto elementsIt = layout.find("elements");
+        if (elementsIt == layout.end() || !elementsIt->is_object()) {
+            return fallback;
+        }
+        const auto itemIt = elementsIt->find(name);
+        if (itemIt == elementsIt->end() || !itemIt->is_object()) {
+            return fallback;
+        }
+        return std::clamp(static_cast<VSTGUI::CCoord>(itemIt->value("fontSize", fallback)), 6.0, 24.0);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+class BitmapView : public VSTGUI::CView {
+public:
+    BitmapView(const VSTGUI::CRect& rect, const std::string& filename, float alpha = 1.0f)
+        : CView(rect), bitmap(loadGuiBitmap(filename)), alpha(alpha) {}
+
+    void draw(VSTGUI::CDrawContext* context) override {
+        if (bitmap) {
+            bitmap->draw(context, getViewSize(), VSTGUI::CPoint(0, 0), alpha);
+        }
+        setDirty(false);
+    }
+
+private:
+    VSTGUI::SharedPointer<VSTGUI::CBitmap> bitmap;
+    float alpha;
+
+    CLASS_METHODS_NOCOPY(BitmapView, VSTGUI::CView)
+};
 
 class StyledPanel : public VSTGUI::CViewContainer {
 public:
@@ -119,9 +289,15 @@ public:
     }
 
     void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
-        auto path = VSTGUI::owned(context->createRoundRectGraphicsPath(getViewSize(), radius));
+        const auto view = getViewSize();
+        const VSTGUI::CRect size(0, 0, view.getWidth(), view.getHeight());
+        auto path = VSTGUI::owned(context->createRoundRectGraphicsPath(size, radius));
         context->setFillColor(fill);
         context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathFilled);
+        context->setFrameColor(VSTGUI::CColor(37, 39, 35));
+        for (auto y = size.top + 3.0; y < size.bottom; y += 4.0) {
+            context->drawLine(VSTGUI::CPoint(size.left + 2.0, y), VSTGUI::CPoint(size.right - 2.0, y));
+        }
         context->setFrameColor(stroke);
         context->setLineWidth(1.0);
         context->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathStroked);
@@ -135,10 +311,180 @@ private:
     CLASS_METHODS_NOCOPY(StyledPanel, VSTGUI::CViewContainer)
 };
 
+class RackBackground : public VSTGUI::CViewContainer {
+public:
+    explicit RackBackground(const VSTGUI::CRect& rect) : CViewContainer(rect), skin(loadGuiBitmap("orch_full_skin_dynamic.png")) {
+        setTransparency(true);
+    }
+
+    void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
+        const auto size = getViewSize();
+        if (skin) {
+            skin->draw(context, size);
+            const auto* calibration = std::getenv("ORCH_GUI_CALIBRATION");
+            if (calibration && calibration[0] == '1') {
+                context->setFrameColor(VSTGUI::CColor(255, 64, 64, 210));
+                context->setLineWidth(1.0);
+                drawCrosshair(context, kLeftRailCenterX, 80.0);
+                drawCrosshair(context, kRightRailCenterX, 80.0);
+                drawCrosshair(context, kLeftRailCenterX, 176.0);
+                drawCrosshair(context, kLeftRailCenterX, 306.0);
+            }
+            return;
+        }
+
+        // Keep bitmap failures visually obvious while developing the skin.
+        context->setFillColor(VSTGUI::CColor(86, 24, 28));
+        context->drawRect(size, VSTGUI::kDrawFilled);
+    }
+
+private:
+    static void drawCrosshair(VSTGUI::CDrawContext* context, VSTGUI::CCoord x, VSTGUI::CCoord y) {
+        context->drawLine(VSTGUI::CPoint(x - 8.0, y), VSTGUI::CPoint(x + 8.0, y));
+        context->drawLine(VSTGUI::CPoint(x, y - 8.0), VSTGUI::CPoint(x, y + 8.0));
+        context->drawEllipse(VSTGUI::CRect(x - 3.0, y - 3.0, x + 3.0, y + 3.0), VSTGUI::kDrawStroked);
+    }
+
+    VSTGUI::SharedPointer<VSTGUI::CBitmap> skin;
+    CLASS_METHODS_NOCOPY(RackBackground, VSTGUI::CViewContainer)
+};
+
+class SoftOptionMenu : public VSTGUI::COptionMenu {
+public:
+    SoftOptionMenu(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener, int32_t tag)
+        : COptionMenu(rect, listener, tag) {}
+
+    void draw(VSTGUI::CDrawContext* context) override {
+        const auto size = getViewSize();
+        context->setFont(VSTGUI::kNormalFontSmall);
+        context->setFontColor(kAccent);
+        const auto current = getCurrentIndex();
+        const char* title = "";
+        if (current >= 0) {
+            if (auto* entry = getEntry(current)) {
+                title = entry->getTitle();
+            }
+        }
+        context->drawString(title, VSTGUI::CRect(size.left + 12, size.top + 4, size.right - 24, size.bottom - 3), VSTGUI::kLeftText);
+        setDirty(false);
+    }
+
+private:
+    CLASS_METHODS_NOCOPY(SoftOptionMenu, VSTGUI::COptionMenu)
+};
+
+class ScopeDisplay : public VSTGUI::CViewContainer {
+public:
+    explicit ScopeDisplay(const VSTGUI::CRect& rect) : CViewContainer(rect) {
+        setTransparency(true);
+    }
+
+    void setPatchName(const std::string& next) {
+        patchName = next.empty() ? "Untitled Patch" : next;
+        invalid();
+    }
+
+    void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
+        const auto view = getViewSize();
+        const VSTGUI::CRect size(0, 0, view.getWidth(), view.getHeight());
+        auto screen = size;
+        screen.inset(4.0, 10.0);
+        context->setFillColor(VSTGUI::CColor(9, 15, 10));
+        context->setFrameColor(VSTGUI::CColor(24, 32, 23));
+        context->drawRect(screen, VSTGUI::kDrawFilledAndStroked);
+        context->setFrameColor(VSTGUI::CColor(18, 26, 18));
+        for (auto y = screen.top + 8.0; y < screen.bottom; y += 14.0) {
+            context->drawLine(VSTGUI::CPoint(screen.left, y), VSTGUI::CPoint(screen.right, y));
+        }
+
+        context->setFont(VSTGUI::kNormalFontVerySmall);
+        context->setFontColor(kAccent);
+        context->drawString("CURRENT PATCH", VSTGUI::CRect(screen.left, screen.top + 11, screen.right, screen.top + 27), VSTGUI::kCenterText);
+        context->setFont(VSTGUI::kNormalFontSmall);
+        context->drawString(patchName.c_str(), VSTGUI::CRect(screen.left, screen.top + 30, screen.right, screen.top + 49), VSTGUI::kCenterText);
+
+        VSTGUI::CPoint last;
+        bool hasLast = false;
+        context->setFrameColor(VSTGUI::CColor(162, 242, 112));
+        context->setLineWidth(1.4);
+        const auto width = screen.getWidth();
+        const auto waveformTop = screen.top + 58.0;
+        const auto waveformBottom = screen.bottom - 8.0;
+        const auto mid = (waveformTop + waveformBottom) * 0.5;
+        const auto amp = (waveformBottom - waveformTop) * 0.42;
+        for (int i = 0; i <= 120; ++i) {
+            const auto t = static_cast<double>(i) / 120.0;
+            const auto x = screen.left + t * width;
+            const auto y = mid + std::sin(t * 10.0 * 3.14159265358979323846) * amp;
+            VSTGUI::CPoint p(x, y);
+            if (hasLast) {
+                context->drawLine(last, p);
+            }
+            last = p;
+            hasLast = true;
+        }
+    }
+
+private:
+    std::string patchName = "Default Poly Sine";
+
+    CLASS_METHODS_NOCOPY(ScopeDisplay, VSTGUI::CViewContainer)
+};
+
+class DecorativeKnob : public VSTGUI::CView {
+public:
+    DecorativeKnob(const VSTGUI::CRect& rect, std::string label, float value)
+        : CView(rect), label(std::move(label)), value(std::clamp(value, 0.0f, 1.0f)) {}
+
+    void draw(VSTGUI::CDrawContext* context) override {
+        const auto size = getViewSize();
+        auto knob = VSTGUI::CRect(size.left + 9, size.top + 2, size.right - 9, size.top + size.getWidth() - 16);
+        drawKnob(context, knob, value, false);
+        context->setFont(VSTGUI::kNormalFontVerySmall);
+        context->setFontColor(kText);
+        context->drawString(label.c_str(), VSTGUI::CRect(size.left, size.bottom - 17, size.right, size.bottom), VSTGUI::kCenterText);
+        setDirty(false);
+    }
+
+private:
+    static void drawKnob(VSTGUI::CDrawContext* context, VSTGUI::CRect knob, float value, bool leds) {
+        const auto cx = (knob.left + knob.right) * 0.5;
+        const auto cy = (knob.top + knob.bottom) * 0.5;
+        const auto radius = knob.getWidth() * 0.5;
+        if (leds) {
+            context->setFillColor(kAccent);
+            for (int i = 0; i < 18; ++i) {
+                const auto a = (-140.0 + i * (280.0 / 17.0)) * 3.14159265358979323846 / 180.0;
+                const auto dot = VSTGUI::CRect(cx + std::cos(a) * (radius + 7.0) - 1.5, cy + std::sin(a) * (radius + 7.0) - 1.5,
+                                                cx + std::cos(a) * (radius + 7.0) + 1.5, cy + std::sin(a) * (radius + 7.0) + 1.5);
+                context->drawEllipse(dot, VSTGUI::kDrawFilled);
+            }
+        }
+        context->setFillColor(VSTGUI::CColor(8, 9, 9));
+        context->setFrameColor(VSTGUI::CColor(58, 60, 55));
+        context->setLineWidth(2.0);
+        context->drawEllipse(knob, VSTGUI::kDrawFilledAndStroked);
+        auto inner = knob;
+        inner.inset(7, 7);
+        context->setFillColor(VSTGUI::CColor(25, 26, 24));
+        context->setFrameColor(VSTGUI::CColor(15, 16, 15));
+        context->drawEllipse(inner, VSTGUI::kDrawFilledAndStroked);
+        const auto angle = (-135.0 + value * 270.0) * 3.14159265358979323846 / 180.0;
+        context->setFrameColor(VSTGUI::CColor(190, 195, 180));
+        context->setLineWidth(2.0);
+        context->drawLine(VSTGUI::CPoint(cx, cy), VSTGUI::CPoint(cx + std::cos(angle) * (radius - 8.0), cy + std::sin(angle) * (radius - 8.0)));
+    }
+
+    std::string label;
+    float value;
+
+    CLASS_METHODS_NOCOPY(DecorativeKnob, VSTGUI::CView)
+};
+
 class GraphDialControl : public VSTGUI::CControl {
 public:
-    GraphDialControl(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener, int32_t tag, std::string label, float value)
-        : CControl(rect, listener, tag), label(std::move(label)) {
+    GraphDialControl(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener, int32_t tag, std::string label, float value, bool compact = false)
+        : CControl(rect, listener, tag), label(std::move(label)), compact(compact), knobBitmap(loadGuiBitmap("orch_knob_frames.png")) {
         setMin(0.0f);
         setMax(1.0f);
         setValueNormalized(std::clamp(value, 0.0f, 1.0f));
@@ -146,37 +492,50 @@ public:
 
     void draw(VSTGUI::CDrawContext* context) override {
         const auto size = getViewSize();
-        auto knob = VSTGUI::CRect(size.left + 19, size.top + 5, size.left + 73, size.top + 59);
         const auto value = std::clamp(getValueNormalized(), 0.0f, 1.0f);
-        const auto angle = (-135.0 + value * 270.0) * 3.14159265358979323846 / 180.0;
-        const auto cx = (knob.left + knob.right) * 0.5;
-        const auto cy = (knob.top + knob.bottom) * 0.5;
-        const auto radius = (knob.getWidth() * 0.5) - 7.0;
+        constexpr auto bitmapSize = 62.0;
+        // Right-rail controls reserve a separate text column, preventing the
+        // dial label/value from intersecting the rotating bitmap.
+        const auto bitmapLeft = compact
+            ? size.left + (size.getWidth() - bitmapSize) * 0.5
+            : size.left + 4.0;
+        const VSTGUI::CRect bitmapRect(bitmapLeft, size.top, bitmapLeft + bitmapSize, size.top + bitmapSize);
 
-        context->setFillColor(VSTGUI::CColor(10, 13, 19));
-        context->setFrameColor(VSTGUI::CColor(60, 77, 101));
-        context->setLineWidth(1.4);
-        context->drawEllipse(knob, VSTGUI::kDrawFilledAndStroked);
+        if (knobBitmap) {
+            const auto frameIndex = std::clamp(static_cast<int>(value * 100.0f + 0.5f), 0, 100);
+            knobBitmap->draw(context, bitmapRect, VSTGUI::CPoint(0, frameIndex * bitmapSize));
+        } else {
+            auto knob = bitmapRect;
+            knob.inset(4.0, 4.0);
+            context->setFillColor(VSTGUI::CColor(10, 13, 19));
+            context->setFrameColor(VSTGUI::CColor(61, 64, 58));
+            context->setLineWidth(2.0);
+            context->drawEllipse(knob, VSTGUI::kDrawFilledAndStroked);
 
-        auto inner = knob;
-        inner.inset(7, 7);
-        context->setFillColor(kPanelLift);
-        context->setFrameColor(VSTGUI::CColor(99, 122, 151));
-        context->drawEllipse(inner, VSTGUI::kDrawFilledAndStroked);
-
-        VSTGUI::CPoint start(cx, cy);
-        VSTGUI::CPoint end(cx + std::cos(angle) * radius, cy + std::sin(angle) * radius);
-        context->setFrameColor(kAccent);
-        context->setLineWidth(3.0);
-        context->drawLine(start, end);
+            auto inner = knob;
+            inner.inset(7, 7);
+            context->setFillColor(kPanelLift);
+            context->setFrameColor(VSTGUI::CColor(99, 122, 151));
+            context->drawEllipse(inner, VSTGUI::kDrawFilledAndStroked);
+        }
 
         context->setFontColor(kText);
-        context->setFont(VSTGUI::kNormalFontSmall);
-        context->drawString(label.c_str(), VSTGUI::CRect(size.left, size.top + 61, size.right, size.top + 78), VSTGUI::kCenterText);
-        context->setFontColor(kMuted);
         char valueText[16] = {};
         snprintf(valueText, sizeof(valueText), "%d%%", static_cast<int>(value * 100.0f + 0.5f));
-        context->drawString(valueText, VSTGUI::CRect(size.left, size.top + 76, size.right, size.top + 92), VSTGUI::kCenterText);
+        context->setFontColor(kAccent);
+        if (compact) {
+            context->setFont(VSTGUI::kNormalFontVerySmall);
+            context->setFontColor(kText);
+            context->drawString(label.c_str(), VSTGUI::CRect(size.left, size.top + 56, size.right, size.top + 72), VSTGUI::kCenterText);
+            context->setFontColor(kAccent);
+            context->drawString(valueText, VSTGUI::CRect(size.left, size.top + 72, size.right, size.top + 88), VSTGUI::kCenterText);
+        } else {
+            context->setFont(VSTGUI::kNormalFontVerySmall);
+            context->setFontColor(kText);
+            context->drawString(label.c_str(), VSTGUI::CRect(size.left + 70, size.top + 17, size.right, size.top + 34), VSTGUI::kLeftText);
+            context->setFontColor(kAccent);
+            context->drawString(valueText, VSTGUI::CRect(size.left + 70, size.top + 36, size.right, size.top + 53), VSTGUI::kLeftText);
+        }
         setDirty(false);
     }
 
@@ -209,8 +568,8 @@ public:
 private:
     void setValueFromPoint(const VSTGUI::CPoint& where) {
         const auto size = getViewSize();
-        const auto top = size.top + 5;
-        const auto bottom = size.top + 59;
+        const auto top = size.top + 4;
+        const auto bottom = size.top + 58;
         const auto value = std::clamp(static_cast<float>((bottom - where.y) / (bottom - top)), 0.0f, 1.0f);
         if (value != getValueNormalized()) {
             setValueNormalized(value);
@@ -220,6 +579,8 @@ private:
     }
 
     std::string label;
+    bool compact;
+    VSTGUI::SharedPointer<VSTGUI::CBitmap> knobBitmap;
 
     CLASS_METHODS_NOCOPY(GraphDialControl, VSTGUI::CControl)
 };
@@ -232,20 +593,26 @@ struct OrchVstGuiEditor::Impl {
     OrchFaustController* controller = nullptr;
     VSTGUI::CViewContainer* root = nullptr;
     VSTGUI::CViewContainer* dialPanel = nullptr;
+    VSTGUI::CViewContainer* extraDialPanel = nullptr;
     VSTGUI::CTextLabel* portLabel = nullptr;
     VSTGUI::CTextLabel* currentPatchLabel = nullptr;
+    ScopeDisplay* scopeDisplay = nullptr;
     VSTGUI::CTextLabel* presetCountLabel = nullptr;
     VSTGUI::COptionMenu* presetMenu = nullptr;
     std::vector<std::string> presetNames;
     std::vector<std::filesystem::path> presetPaths;
     std::vector<std::string> dialKeys;
     std::vector<std::tuple<std::string, std::string, float>> pendingLayout;
+    json guiLayout;
+    VSTGUI::CRect dialPanelBounds;
+    VSTGUI::CRect extraDialPanelBounds;
+    VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> noteOffTimer;
     bool requestedInitialState = false;
 };
 
 OrchVstGuiEditor::OrchVstGuiEditor(OrchFaustController* controller)
     : VSTGUIEditor(controller, nullptr), impl(new Impl(controller)) {
-    Steinberg::ViewRect r(0, 0, 500, 390);
+    Steinberg::ViewRect r(0, 0, kEditorWidth, kEditorHeight);
     setRect(r);
 }
 
@@ -254,7 +621,7 @@ OrchVstGuiEditor::~OrchVstGuiEditor() {
 }
 
 bool PLUGIN_API OrchVstGuiEditor::open(void* parent, const VSTGUI::PlatformType& platformType) {
-    frame = new VSTGUI::CFrame(VSTGUI::CRect(0, 0, 500, 390), this);
+    frame = new VSTGUI::CFrame(VSTGUI::CRect(0, 0, kEditorWidth, kEditorHeight), this);
     if (!frame->open(parent, platformType)) {
         frame->forget();
         frame = nullptr;
@@ -272,10 +639,15 @@ void PLUGIN_API OrchVstGuiEditor::close() {
     }
     impl->root = nullptr;
     impl->dialPanel = nullptr;
+    impl->extraDialPanel = nullptr;
     impl->portLabel = nullptr;
     impl->currentPatchLabel = nullptr;
     impl->presetCountLabel = nullptr;
     impl->presetMenu = nullptr;
+    if (impl->noteOffTimer) {
+        impl->noteOffTimer->stop();
+        impl->noteOffTimer = nullptr;
+    }
     if (frame) {
         frame->close();
         frame = nullptr;
@@ -291,52 +663,122 @@ VSTGUI::CMessageResult OrchVstGuiEditor::notify(VSTGUI::CBaseObject* sender, con
 }
 
 void OrchVstGuiEditor::rebuild() {
-    auto* root = new VSTGUI::CViewContainer(VSTGUI::CRect(0, 0, 500, 390));
-    root->setBackgroundColor(kBg);
+    impl->guiLayout = loadGuiLayout();
+    const auto absoluteRect = [this](const char* collection, const char* name, const VSTGUI::CRect& fallback) {
+        return layoutRect(impl->guiLayout, collection, name, fallback);
+    };
+    const auto localRect = [this](const char* collection, const char* name,
+                                  const VSTGUI::CRect& absoluteFallback, const VSTGUI::CRect& parentBounds) {
+        return layoutRectInParent(impl->guiLayout, collection, name, absoluteFallback, parentBounds);
+    };
+    auto* root = new RackBackground(VSTGUI::CRect(0, 0, kEditorWidth, kEditorHeight));
     impl->root = root;
     frame->addView(root);
 
-    auto* header = new StyledPanel(VSTGUI::CRect(20, 12, 480, 76), kPanel2, VSTGUI::CColor(28, 36, 50), 10.0);
-    root->addView(header);
-    auto* title = makeLabel(VSTGUI::CRect(0, 10, 460, 36), "Orch Synth");
-    title->setFont(VSTGUI::kNormalFontBig);
-    header->addView(title);
-    auto* subtitle = makeLabel(VSTGUI::CRect(0, 39, 460, 58), "VST3 Controller", kMuted);
-    subtitle->setFont(VSTGUI::kNormalFontSmall);
-    header->addView(subtitle);
+    const auto leftRailBounds = absoluteRect("groups", "leftRail", VSTGUI::CRect(13, 0, 143, 430));
+    const auto centerPanelBounds = absoluteRect("groups", "centerPanel", VSTGUI::CRect(155, 0, 385, 430));
+    const auto rightRailBounds = absoluteRect("groups", "rightRail", VSTGUI::CRect(397, 0, 527, 430));
+    auto* leftRail = new VSTGUI::CViewContainer(leftRailBounds);
+    leftRail->setTransparency(true);
+    root->addView(leftRail);
+    auto* centerPanel = new VSTGUI::CViewContainer(centerPanelBounds);
+    centerPanel->setTransparency(true);
+    root->addView(centerPanel);
+    auto* rightRail = new VSTGUI::CViewContainer(rightRailBounds);
+    rightRail->setTransparency(true);
+    root->addView(rightRail);
 
-    root->addView(makeButton(VSTGUI::CRect(28, 98, 226, 134), this, kTagTestNote, "Play C1 Note"));
+    auto* perfTitle = makeLabel(localRect("elements", "performanceTitle", VSTGUI::CRect(37, 24, 119, 44), leftRailBounds), "PERFORMANCE", kMuted);
+    perfTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    leftRail->addView(perfTitle);
+    auto* playButton = makeButton(localRect("elements", "playButton", VSTGUI::CRect(48, 49, 110, 111), leftRailBounds), this, kTagTestNote, "");
+    if (auto playBitmap = loadGuiBitmap("orch_button_play_fit.png")) {
+        // CTextButton defaults to left-aligned icons. With an empty title that
+        // shifts the 52 px play bitmap 5 px left inside its 62 px hit target.
+        playButton->setIconPosition(VSTGUI::CDrawMethods::kIconCenterAbove);
+        playButton->setIcon(playBitmap.get());
+        playButton->setIconHighlighted(playBitmap.get());
+    }
+    leftRail->addView(playButton);
+    auto* playLabel = makeLabel(localRect("elements", "playLabel", VSTGUI::CRect(13, 109, 143, 126), leftRailBounds), "PLAY C1 NOTE", kText);
+    playLabel->setFont(VSTGUI::kNormalFontVerySmall);
+    leftRail->addView(playLabel);
 
-    auto* presetPanel = new StyledPanel(VSTGUI::CRect(20, 148, 480, 228), kPanel, kBorder, 8.0);
-    root->addView(presetPanel);
-    auto* presetTitle = makeLabel(VSTGUI::CRect(14, 9, 132, 29), "Load Preset");
-    presetTitle->setFont(VSTGUI::kNormalFontSmall);
-    presetPanel->addView(presetTitle);
-    impl->currentPatchLabel = makeLabel(VSTGUI::CRect(150, 9, 438, 29), "Current Patch: Default Poly Sine", kAccent);
-    impl->currentPatchLabel->setFont(VSTGUI::kNormalFontSmall);
-    presetPanel->addView(impl->currentPatchLabel);
-    impl->presetMenu = new VSTGUI::COptionMenu(VSTGUI::CRect(14, 38, 318, 63), this, kTagPresetMenu);
+    auto* patchTitle = makeLabel(localRect("elements", "patchTitle", VSTGUI::CRect(13, 138, 143, 156), leftRailBounds), "PATCH", kMuted);
+    patchTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    leftRail->addView(patchTitle);
+    impl->presetMenu = new SoftOptionMenu(localRect("elements", "presetMenu", VSTGUI::CRect(19, 154, 137, 182), leftRailBounds), this, kTagPresetMenu);
     impl->presetMenu->setBackColor(VSTGUI::CColor(236, 242, 250));
     impl->presetMenu->setFrameColor(kBorder);
     impl->presetMenu->setFontColor(VSTGUI::CColor(17, 24, 39));
-    presetPanel->addView(impl->presetMenu);
-    presetPanel->addView(makeButton(VSTGUI::CRect(340, 34, 448, 66), this, kTagReloadPreset, "Reload Preset"));
-    impl->presetCountLabel = makeLabel(VSTGUI::CRect(14, 61, 220, 75), "0 presets loaded", kMuted);
+    leftRail->addView(impl->presetMenu);
+    impl->presetCountLabel = makeLabel(localRect("elements", "presetCount", VSTGUI::CRect(27, 184, 129, 199), leftRailBounds), "0 presets loaded", kMuted);
     impl->presetCountLabel->setFont(VSTGUI::kNormalFontVerySmall);
-    presetPanel->addView(impl->presetCountLabel);
+    leftRail->addView(impl->presetCountLabel);
+    leftRail->addView(makeButton(localRect("elements", "refreshButton", VSTGUI::CRect(35, 214, 121, 238), leftRailBounds), this, kTagRefreshState, "REFRESH", layoutFontSize(impl->guiLayout, "refreshButton", 12.0)));
+    leftRail->addView(makeButton(localRect("elements", "reloadButton", VSTGUI::CRect(35, 244, 121, 268), leftRailBounds), this, kTagReloadPreset, "RELOAD", layoutFontSize(impl->guiLayout, "reloadButton", 12.0)));
 
-    impl->dialPanel = new StyledPanel(VSTGUI::CRect(20, 240, 480, 332), kPanel, kBorder, 8.0);
-    root->addView(impl->dialPanel);
-    auto* dialTitle = makeLabel(VSTGUI::CRect(14, 9, 140, 29), "Graph Dials");
-    dialTitle->setFont(VSTGUI::kNormalFontSmall);
-    impl->dialPanel->addView(dialTitle);
+    auto* systemTitle = makeLabel(localRect("elements", "systemTitle", VSTGUI::CRect(13, 278, 143, 297), leftRailBounds), "SYSTEM", kMuted);
+    systemTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    leftRail->addView(systemTitle);
+    auto* webEditorButton = makeButton(localRect("elements", "webEditorButton", VSTGUI::CRect(41, 318, 135, 342), leftRailBounds), this, kTagOpenEditor, "WEB EDITOR", layoutFontSize(impl->guiLayout, "webEditorButton", 9.0));
+    leftRail->addView(webEditorButton);
+    impl->portLabel = makeLabel(localRect("elements", "portLabel", VSTGUI::CRect(29, 353, 127, 379), leftRailBounds), "PORT 9020", kAccent);
+    impl->portLabel->setFont(VSTGUI::kNormalFontVerySmall);
+    leftRail->addView(impl->portLabel);
 
-    auto* editorPanel = new StyledPanel(VSTGUI::CRect(20, 342, 480, 378), kPanel, kBorder, 8.0);
-    root->addView(editorPanel);
-    editorPanel->addView(makeButton(VSTGUI::CRect(14, 5, 210, 31), this, kTagOpenEditor, "Open Web Editor"));
-    impl->portLabel = makeLabel(VSTGUI::CRect(226, 9, 390, 29), "Editor Port: 9020", kAccent);
-    impl->portLabel->setFont(VSTGUI::kNormalFontSmall);
-    editorPanel->addView(impl->portLabel);
+    auto* title = makeLabel(localRect("elements", "title", VSTGUI::CRect(151, 7, 381, 29), centerPanelBounds), "O R C H  S Y N T H");
+    title->setFont(VSTGUI::kNormalFontBig);
+    centerPanel->addView(title);
+    auto* subtitle = makeLabel(localRect("elements", "subtitle", VSTGUI::CRect(155, 35, 385, 51), centerPanelBounds), "V S T 3  C O N T R O L L E R", kMuted);
+    subtitle->setFont(VSTGUI::kNormalFontVerySmall);
+    centerPanel->addView(subtitle);
+
+    impl->scopeDisplay = new ScopeDisplay(localRect("elements", "scope", VSTGUI::CRect(169, 50, 371, 186), centerPanelBounds));
+    centerPanel->addView(impl->scopeDisplay);
+    impl->currentPatchLabel = makeLabel(VSTGUI::CRect(0, 0, 1, 1), "", kAccent);
+    impl->currentPatchLabel->setVisible(false);
+    centerPanel->addView(impl->currentPatchLabel);
+
+    auto* brand = makeLabel(localRect("elements", "brand", VSTGUI::CRect(155, 370, 385, 390), centerPanelBounds), "ORCH", VSTGUI::CColor(111, 113, 106));
+    brand->setFont(VSTGUI::kNormalFontSmall);
+    centerPanel->addView(brand);
+
+    auto* dialRailTitle = makeLabel(localRect("elements", "dialTitle", VSTGUI::CRect(397, 24, 517, 44), rightRailBounds), "GRAPH DIALS", kMuted);
+    dialRailTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    rightRail->addView(dialRailTitle);
+    // Graph-dial slots are authored in canvas coordinates.  Keep their
+    // container coextensive with the rail so a slot can overlap a decorative
+    // group boundary without clipping the knob bitmap or moving its centre.
+    impl->dialPanelBounds = rightRailBounds;
+    impl->dialPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(
+        impl->dialPanelBounds.left - rightRailBounds.left,
+        impl->dialPanelBounds.top - rightRailBounds.top,
+        impl->dialPanelBounds.right - rightRailBounds.left,
+        impl->dialPanelBounds.bottom - rightRailBounds.top));
+    impl->dialPanel->setTransparency(true);
+    rightRail->addView(impl->dialPanel);
+
+    impl->extraDialPanelBounds = centerPanelBounds;
+    impl->extraDialPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(
+        impl->extraDialPanelBounds.left - centerPanelBounds.left,
+        impl->extraDialPanelBounds.top - centerPanelBounds.top,
+        impl->extraDialPanelBounds.right - centerPanelBounds.left,
+        impl->extraDialPanelBounds.bottom - centerPanelBounds.top));
+    impl->extraDialPanel->setTransparency(true);
+    centerPanel->addView(impl->extraDialPanel);
+
+    const auto ioPanelBounds = layoutGroupBounds(impl->guiLayout, "ioPanel", VSTGUI::CRect(409, 298, 505, 384), rightRailBounds);
+    auto* ioPanel = new VSTGUI::CViewContainer(VSTGUI::CRect(
+        ioPanelBounds.left - rightRailBounds.left,
+        ioPanelBounds.top - rightRailBounds.top,
+        ioPanelBounds.right - rightRailBounds.left,
+        ioPanelBounds.bottom - rightRailBounds.top));
+    ioPanel->setTransparency(true);
+    rightRail->addView(ioPanel);
+    auto* ioTitle = makeLabel(localRect("elements", "ioTitle", VSTGUI::CRect(409, 306, 505, 322), ioPanelBounds), "I/O", kMuted);
+    ioTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    ioPanel->addView(ioTitle);
 }
 
 void OrchVstGuiEditor::requestInitialState() {
@@ -390,12 +832,23 @@ void OrchVstGuiEditor::loadPresets() {
 
 void OrchVstGuiEditor::valueChanged(VSTGUI::CControl* control) {
     const auto tag = control ? control->getTag() : -1;
+    const auto activated = control && control->getValueNormalized() > 0.5f;
     if (tag == kTagTestNote) {
-        playTestNote();
-    } else if (tag == kTagReloadPreset || tag == kTagPresetMenu) {
+        if (activated) {
+            playTestNote();
+        }
+    } else if (tag == kTagPresetMenu) {
         loadSelectedPreset();
+    } else if (tag == kTagReloadPreset && activated) {
+        loadSelectedPreset();
+    } else if (tag == kTagRefreshState) {
+        if (activated) {
+            requestInitialState();
+        }
     } else if (tag == kTagOpenEditor) {
-        openWebEditor();
+        if (activated) {
+            openWebEditor();
+        }
     } else if (tag >= kTagDialBase) {
         const auto index = static_cast<size_t>(tag - kTagDialBase);
         if (impl->controller && index < impl->dialKeys.size()) {
@@ -406,39 +859,59 @@ void OrchVstGuiEditor::valueChanged(VSTGUI::CControl* control) {
 
 void OrchVstGuiEditor::updatePortLabel(int port) {
     if (impl->portLabel) {
-        impl->portLabel->setText(("Editor Port: " + std::to_string(port)).c_str());
+        impl->portLabel->setText(("PORT " + std::to_string(port)).c_str());
     }
 }
 
 void OrchVstGuiEditor::updateCurrentPatchLabel(const std::string& name) {
     if (impl->currentPatchLabel) {
-        impl->currentPatchLabel->setText(("Current Patch: " + (name.empty() ? std::string("Untitled Patch") : name)).c_str());
+        impl->currentPatchLabel->setText((name.empty() ? std::string("Untitled Patch") : name).c_str());
+    }
+    if (impl->scopeDisplay) {
+        impl->scopeDisplay->setPatchName(name);
     }
 }
 
 void OrchVstGuiEditor::updateDialLayout(const std::vector<std::tuple<std::string, std::string, float>>& layout) {
     impl->pendingLayout = layout;
-    if (!impl->dialPanel) {
+    if (!impl->dialPanel || !impl->extraDialPanel) {
         return;
     }
     impl->dialPanel->removeAll();
-    auto* dialTitle = makeLabel(VSTGUI::CRect(14, 9, 140, 29), "Graph Dials");
-    dialTitle->setFont(VSTGUI::kNormalFontSmall);
-    impl->dialPanel->addView(dialTitle);
+    impl->extraDialPanel->removeAll();
     impl->dialKeys.clear();
 
     int visibleIndex = 0;
     for (const auto& [key, label, value] : layout) {
-        if (visibleIndex >= 4) {
+        if (visibleIndex >= 9) {
             break;
         }
-        const auto x = 16.0 + visibleIndex * 108.0;
-        const auto y = 31.0;
         impl->dialKeys.push_back(key);
-        impl->dialPanel->addView(new GraphDialControl(VSTGUI::CRect(x, y, x + 92, y + 90), this, kTagDialBase + visibleIndex, label.empty() ? key : label, value));
+        const auto dialLabel = label.empty() ? key : label;
+        if (visibleIndex < 3) {
+            const auto slotName = "rightDial" + std::to_string(visibleIndex + 1);
+            const auto y = 4.0 + visibleIndex * 78.0;
+            impl->dialPanel->addView(new GraphDialControl(
+                layoutRectInParent(impl->guiLayout, "elements", slotName.c_str(),
+                                   VSTGUI::CRect(397, 56 + visibleIndex * 78.0, 527, 126 + visibleIndex * 78.0),
+                                   impl->dialPanelBounds),
+                this, kTagDialBase + visibleIndex, dialLabel, value));
+        } else {
+            const auto extraIndex = visibleIndex - 3;
+            const auto column = extraIndex % 3;
+            const auto row = extraIndex / 3;
+            const auto slotName = "extraDial" + std::to_string(extraIndex + 1);
+            impl->extraDialPanel->addView(new GraphDialControl(
+                layoutRectInParent(impl->guiLayout, "elements", slotName.c_str(),
+                                   VSTGUI::CRect(156 + column * 76.0, 195 + row * 92.0,
+                                                 232 + column * 76.0, 285 + row * 92.0),
+                                   impl->extraDialPanelBounds),
+                this, kTagDialBase + visibleIndex, dialLabel, value, true));
+        }
         ++visibleIndex;
     }
     impl->dialPanel->invalid();
+    impl->extraDialPanel->invalid();
 }
 
 void OrchVstGuiEditor::loadSelectedPreset() {
@@ -490,14 +963,25 @@ void OrchVstGuiEditor::loadSelectedPreset() {
 
 void OrchVstGuiEditor::playTestNote() {
     try {
+        if (impl->noteOffTimer) {
+            impl->noteOffTimer->stop();
+        }
         char buffer[1024];
         osc::OutboundPacketStream packet(buffer, sizeof(buffer));
         UdpTransmitSocket socket(IpEndpointName("127.0.0.1", impl->controller ? impl->controller->getActivePort() : 9020));
         packet << osc::BeginMessage("/orch_faust/note_on") << 36.0f << 1.0f << osc::EndMessage;
         socket.Send(packet.Data(), packet.Size());
-        packet.Clear();
-        packet << osc::BeginMessage("/orch_faust/note_off") << 36.0f << osc::EndMessage;
-        socket.Send(packet.Data(), packet.Size());
+        impl->noteOffTimer = VSTGUI::owned(new VSTGUI::CVSTGUITimer([this](VSTGUI::CVSTGUITimer* timer) {
+            timer->stop();
+            try {
+                char noteOffBuffer[1024];
+                osc::OutboundPacketStream noteOffPacket(noteOffBuffer, sizeof(noteOffBuffer));
+                noteOffPacket << osc::BeginMessage("/orch_faust/note_off") << 36.0f << osc::EndMessage;
+                UdpTransmitSocket noteOffSocket(IpEndpointName("127.0.0.1", impl->controller ? impl->controller->getActivePort() : 9020));
+                noteOffSocket.Send(noteOffPacket.Data(), noteOffPacket.Size());
+            } catch (...) {
+            }
+        }, 500, true));
     } catch (...) {
     }
 }

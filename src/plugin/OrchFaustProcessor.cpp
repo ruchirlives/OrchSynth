@@ -18,6 +18,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -275,9 +276,13 @@ void OrchFaustProcessor::processCompile() {
         return;
     }
     currentPatchName = optGraph->name.empty() ? "Untitled Patch" : optGraph->name;
+    std::set<std::string> connectedVstDialIds;
+    for (const auto& connection : optGraph->connections) {
+        connectedVstDialIds.insert(connection.source);
+    }
     currentVstDialLayout.clear();
     for (const auto& node : optGraph->nodes) {
-        if (node.type == "vst_dial") {
+        if (node.type == "vst_dial" && connectedVstDialIds.count(node.id) > 0) {
             const std::string label = node.name.empty() ? node.id : node.name;
             currentVstDialLayout.emplace_back(node.id, label);
             if (currentVstDialValues.find(node.id) == currentVstDialValues.end()) {

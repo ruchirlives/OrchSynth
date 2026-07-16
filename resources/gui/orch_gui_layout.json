@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 540,
+    "height": 430,
+    "skin": "orch_full_skin_dynamic.png"
+  },
+  "groups": {
+    "leftRail": {
+      "x": 13,
+      "y": 0,
+      "w": 130,
+      "h": 430
+    },
+    "centerPanel": {
+      "x": 155,
+      "y": 0,
+      "w": 230,
+      "h": 430
+    },
+    "rightRail": {
+      "x": 397,
+      "y": 0,
+      "w": 130,
+      "h": 430
+    },
+    "dialPanel": {
+      "parent": "rightRail",
+      "x": 0,
+      "y": 52,
+      "w": 130,
+      "h": 240
+    },
+    "extraDialPanel": {
+      "parent": "centerPanel",
+      "x": 0,
+      "y": 195,
+      "w": 230,
+      "h": 190
+    },
+    "ioPanel": {
+      "parent": "rightRail",
+      "x": 12,
+      "y": 298,
+      "w": 96,
+      "h": 86
+    }
+  },
+  "elements": {
+    "performanceTitle": {
+      "parent": "leftRail",
+      "x": 42,
+      "y": 22,
+      "w": 82,
+      "h": 20,
+      "label": "PERFORMANCE",
+      "type": "label"
+    },
+    "playButton": {
+      "parent": "leftRail",
+      "x": 50,
+      "y": 50,
+      "w": 62,
+      "h": 62,
+      "label": "PLAY",
+      "type": "play"
+    },
+    "playLabel": {
+      "parent": "leftRail",
+      "x": 16,
+      "y": 108,
+      "w": 130,
+      "h": 17,
+      "label": "PLAY C1 NOTE",
+      "type": "label"
+    },
+    "patchTitle": {
+      "parent": "leftRail",
+      "x": 208,
+      "y": 74,
+      "w": 130,
+      "h": 18,
+      "label": "PATCH",
+      "type": "label"
+    },
+    "presetMenu": {
+      "parent": "leftRail",
+      "x": 14,
+      "y": 160,
+      "w": 118,
+      "h": 28,
+      "label": "Preset dropdown",
+      "type": "control"
+    },
+    "presetCount": {
+      "parent": "leftRail",
+      "x": 28,
+      "y": 134,
+      "w": 102,
+      "h": 15,
+      "label": "13 presets loaded",
+      "type": "label"
+    },
+    "refreshButton": {
+      "parent": "leftRail",
+      "x": 40,
+      "y": 214,
+      "w": 84,
+      "h": 26,
+      "label": "REFRESH",
+      "type": "control",
+      "fontSize": 10
+    },
+    "reloadButton": {
+      "parent": "leftRail",
+      "x": 38,
+      "y": 244,
+      "w": 86,
+      "h": 24,
+      "label": "RELOAD",
+      "type": "control",
+      "fontSize": 10
+    },
+    "systemTitle": {
+      "parent": "leftRail",
+      "x": 10,
+      "y": 278,
+      "w": 130,
+      "h": 19,
+      "label": "SYSTEM",
+      "type": "label"
+    },
+    "webEditorButton": {
+      "parent": "leftRail",
+      "x": 40,
+      "y": 328,
+      "w": 94,
+      "h": 24,
+      "label": "WEB EDITOR",
+      "type": "control"
+    },
+    "portLabel": {
+      "parent": "leftRail",
+      "x": 34,
+      "y": 362,
+      "w": 98,
+      "h": 26,
+      "label": "PORT 9020",
+      "type": "label"
+    },
+    "title": {
+      "parent": "centerPanel",
+      "x": 154,
+      "y": 4,
+      "w": 226,
+      "h": 24,
+      "label": "O R C H  S Y N T H",
+      "type": "label"
+    },
+    "subtitle": {
+      "parent": "centerPanel",
+      "x": 154,
+      "y": 28,
+      "w": 230,
+      "h": 16,
+      "label": "V S T 3  C O N T R O L L E R",
+      "type": "label"
+    },
+    "scope": {
+      "parent": "centerPanel",
+      "x": 172,
+      "y": 56,
+      "w": 202,
+      "h": 136,
+      "label": "Patch scope",
+      "type": "scope"
+    },
+    "brand": {
+      "parent": "centerPanel",
+      "x": 156,
+      "y": 402,
+      "w": 230,
+      "h": 20,
+      "label": "ORCH",
+      "type": "label"
+    },
+    "dialTitle": {
+      "parent": "rightRail",
+      "x": 412,
+      "y": 22,
+      "w": 100,
+      "h": 20,
+      "label": "GRAPH DIALS",
+      "type": "label"
+    },
+    "ioTitle": {
+      "parent": "ioPanel",
+      "x": 416,
+      "y": 396,
+      "w": 96,
+      "h": 16,
+      "label": "I/O",
+      "type": "label"
+    },
+    "rightDial1": {
+      "parent": "dialPanel",
+      "x": 398,
+      "y": 46,
+      "w": 130,
+      "h": 70,
+      "label": "Graph dial 1",
+      "type": "dial"
+    },
+    "rightDial2": {
+      "parent": "dialPanel",
+      "x": 398,
+      "y": 114,
+      "w": 130,
+      "h": 70,
+      "label": "Graph dial 2",
+      "type": "dial"
+    },
+    "rightDial3": {
+      "parent": "dialPanel",
+      "x": 398,
+      "y": 182,
+      "w": 130,
+      "h": 70,
+      "label": "Graph dial 3",
+      "type": "dial"
+    },
+    "extraDial1": {
+      "parent": "extraDialPanel",
+      "x": 152,
+      "y": 212,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 4",
+      "type": "dial"
+    },
+    "extraDial2": {
+      "parent": "extraDialPanel",
+      "x": 228,
+      "y": 212,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 5",
+      "type": "dial"
+    },
+    "extraDial3": {
+      "parent": "extraDialPanel",
+      "x": 306,
+      "y": 212,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 6",
+      "type": "dial"
+    },
+    "extraDial4": {
+      "parent": "extraDialPanel",
+      "x": 152,
+      "y": 304,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 7",
+      "type": "dial"
+    },
+    "extraDial5": {
+      "parent": "extraDialPanel",
+      "x": 228,
+      "y": 304,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 8",
+      "type": "dial"
+    },
+    "extraDial6": {
+      "parent": "extraDialPanel",
+      "x": 306,
+      "y": 304,
+      "w": 76,
+      "h": 90,
+      "label": "Graph dial 9",
+      "type": "dial"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orch GUI Positioner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div>
+      <h1>Orch GUI Positioner</h1>
+      <p>Move bounds over the production backing plate. Coordinates are absolute pixels in the 540×430 skin.</p>
+    </div>
+    <div class="toolbar-actions">
+      <label class="toggle"><input id="snap" type="checkbox" checked> Snap 2 px</label>
+      <label class="toggle"><input id="show-names" type="checkbox"> Bounds names</label>
+      <label>Zoom <select id="zoom"><option value="1">100%</option><option value="1.25" selected>125%</option><option value="1.5">150%</option></select></label>
+      <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+      <button id="reload">Revert</button>
+      <button class="primary" id="save">Save layout</button>
+    </div>
+  </header>
+  <main>
+    <section class="workspace" aria-label="Skin alignment workspace">
+      <div id="canvas-shell" class="canvas-shell">
+        <div id="canvas" class="canvas">
+          <img id="skin" alt="Orch synth skin">
+          <div id="overlay"></div>
+        </div>
+      </div>
+      <p id="status" class="status">Loading layout…</p>
+    </section>
+    <aside class="inspector">
+      <section>
+        <h2>Selection</h2>
+        <div id="selection-name" class="selection-name">None</div>
+        <div id="size-readout" class="size-readout">Select a control to resize it.</div>
+        <div class="field-grid">
+          <label>X <input id="field-x" type="number" step="1"></label>
+          <label>Y <input id="field-y" type="number" step="1"></label>
+          <label>W <input id="field-w" type="number" min="4" step="1"></label>
+          <label>H <input id="field-h" type="number" min="4" step="1"></label>
+          <label id="font-size-label">Font px <input id="field-fontSize" type="number" min="6" max="24" step="1"></label>
+        </div>
+        <p id="selection-parent" class="hint">Select a control or container.</p>
+      </section>
+      <section>
+        <div class="section-heading"><h2>Controls</h2><label class="toggle"><input id="show-groups" type="checkbox"> Groups</label></div>
+        <div id="element-list" class="element-list"></div>
+      </section>
+      <section>
+        <h2>Shortcuts</h2>
+        <p class="hint">Drag to move. Select a bound to expose eight resize handles. Arrow keys nudge 1 px; Shift+Arrow nudges 10 px.</p>
+      </section>
+    </aside>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
