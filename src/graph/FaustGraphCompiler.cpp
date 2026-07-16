@@ -304,7 +304,7 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "\n";
     
     // 4. Map connections (target -> sources)
-    std::map<std::string, std::vector<std::string>> incomingConnections;
+    std::map<std::string, std::vector<Connection>> incomingConnections;
     std::map<std::string, std::map<std::string, std::vector<Connection>>> parameterModulations;
     
     for (const auto& conn : workingGraph.connections) {
@@ -312,12 +312,23 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             std::string paramName = conn.targetHandle.substr(6); // strip "param-"
             parameterModulations[conn.target][paramName].push_back(conn);
         } else {
-            incomingConnections[conn.target].push_back(conn.source);
+            incomingConnections[conn.target].push_back(conn);
         }
     }
     
     // 5. Generate node evaluation code
     ss << "// DSP Signal Flow\n";
+    auto sourceExpr = [&](const Connection& conn) {
+        const Node* sourceNode = nodeMap.at(conn.source);
+        if (conn.sourceHandle == "output-1" && sourceNode->type == "adsr") {
+            return std::string("node_env_") + conn.source;
+        }
+        if (conn.sourceHandle == "output-1" &&
+            (sourceNode->type == "sine" || sourceNode->type == "saw" || sourceNode->type == "square")) {
+            return std::string("min(1.0, max(0.0, (node_") + conn.source + " + 1.0) * 0.5)";
+        }
+        return std::string("node_") + conn.source;
+    };
     for (const auto& nodeId : sortedNodeIds) {
         const Node* nodePtr = nodeMap[nodeId];
         if (!nodePtr) continue;
@@ -328,12 +339,12 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         const auto& inputs = incomingConnections[nodeId];
         if (!inputs.empty()) {
             if (inputs.size() == 1) {
-                inputsExpr = "node_" + inputs[0];
+                inputsExpr = sourceExpr(inputs[0]);
             } else {
                 std::stringstream inputsSS;
                 inputsSS << "(";
                 for (size_t i = 0; i < inputs.size(); ++i) {
-                    inputsSS << "node_" << inputs[i];
+                    inputsSS << sourceExpr(inputs[i]);
                     if (i < inputs.size() - 1) inputsSS << " + ";
                 }
                 inputsSS << ")";
@@ -362,11 +373,11 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                         if (name == "freq") {
                             // Any modulation targeting freq is treated as semitones
                             // and applied exponentially for musically correct pitch shifting
-                            modSS << " * pow(2.0, node_" << modConn.source << " / 12.0)";
+                            modSS << " * pow(2.0, " << sourceExpr(modConn) << " / 12.0)";
                         } else if (modConn.operation == "add") {
-                            modSS << " + node_" << modConn.source;
+                            modSS << " + " << sourceExpr(modConn);
                         } else {
-                            modSS << " * node_" << modConn.source;
+                            modSS << " * " << sourceExpr(modConn);
                         }
                     }
                     ParamRange range = getParamRange(node.type, name);
@@ -390,7 +401,11 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             return getParamExpr("freq", "440.0");
         };
         
-        ss << "node_" << nodeId << " = ";
+        if (node.type == "adsr") {
+            ss << "node_env_" << nodeId << " = ";
+        } else {
+            ss << "node_" << nodeId << " = ";
+        }
         
         if (node.type == "sine" || node.type == "saw" || node.type == "square") {
             bool trackKb = true;
@@ -480,15 +495,15 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             ss << "en.adsr(" << a << ", " << d << ", " 
                << getParamExpr("sustain", "0.5") << ", " 
                << getParamExpr("release", "0.2") << ", voice_gate) * " << getParamExpr("scale", "1.0");
+            ss << ";\nnode_" << nodeId << " = node_env_" << nodeId;
             if (!inputsExpr.empty()) {
                 ss << " * " << inputsExpr;
             }
+            ss << ";\n";
+            continue;
         }
         else if (node.type == "lfo") {
             std::string freqExpr = getParamExpr("freq", "5.0");
-            if (!inputsExpr.empty()) {
-                freqExpr = "max(0.01, " + freqExpr + " + (" + inputsExpr + "))";
-            }
             ss << "os.osc(" << freqExpr << ") * " << getParamExpr("scale", "1.0");
         }
         else if (node.type == "mixer") {
@@ -769,6 +784,10 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             }
         }
         ss << ";\n";
+        if (node.type == "sine" || node.type == "saw" || node.type == "square") {
+            ss << "node_control_" << nodeId
+               << " = min(1.0, max(0.0, (node_" << nodeId << " + 1.0) * 0.5));\n";
+        }
     }
     ss << "\n";
     
