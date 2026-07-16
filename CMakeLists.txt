@@ -89,6 +89,7 @@ if(WIN32)
     target_link_libraries(OrchSynth
         PRIVATE
             sdk
+            vstgui_support
             oscpack
             nlohmann_json::nlohmann_json
             faust
@@ -99,6 +100,7 @@ else()
     target_link_libraries(OrchSynth
         PRIVATE
             sdk
+            vstgui_support
             oscpack
             nlohmann_json::nlohmann_json
             faust
@@ -215,4 +217,3 @@ if(WIN32)
             $<TARGET_FILE_DIR:test_faust>
     )
 endif()
-
