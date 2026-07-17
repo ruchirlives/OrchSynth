@@ -61,6 +61,19 @@ bridge_vst_test_output.txt_err
 
 # Third party SDKs and precompiled libraries
 third_party/
+!third_party/
+third_party/*
+!third_party/FFTConvolver/
+third_party/FFTConvolver/*
+!third_party/FFTConvolver/AudioFFT.cpp
+!third_party/FFTConvolver/AudioFFT.h
+!third_party/FFTConvolver/FFTConvolver.cpp
+!third_party/FFTConvolver/FFTConvolver.h
+!third_party/FFTConvolver/Utilities.cpp
+!third_party/FFTConvolver/Utilities.h
+!third_party/dr_libs/
+third_party/dr_libs/*
+!third_party/dr_libs/dr_wav.h
 
 # Installer Output
 installer/Output/

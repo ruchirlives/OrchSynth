@@ -3,6 +3,7 @@
 #include "public.sdk/source/vst/vstaudioeffect.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "dsp/VoiceManager.h"
+#include "dsp/ConvolutionProcessor.h"
 #include "osc/OscServer.h"
 #include "osc/OscCommandQueue.h"
 #include <map>
@@ -27,6 +28,7 @@ public:
     Steinberg::tresult PLUGIN_API terminate() override;
     Steinberg::tresult PLUGIN_API setupProcessing(Steinberg::Vst::ProcessSetup& newSetup) override;
     Steinberg::tresult PLUGIN_API setActive(Steinberg::TBool state) override;
+    Steinberg::tresult PLUGIN_API setProcessing(Steinberg::TBool state) override;
     Steinberg::tresult PLUGIN_API process(Steinberg::Vst::ProcessData& data) override;
     Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) override;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
@@ -43,6 +45,8 @@ private:
     void notifyDialLayoutChanged();
 
     VoiceManager voiceManager;
+    ConvolutionProcessor bodyConvolutionProcessor;
+    ConvolutionProcessor convolutionProcessor;
     OscCommandQueue commandQueue;
     std::unique_ptr<OscServer> oscServer;
 
@@ -55,6 +59,7 @@ private:
     float currentAftertouch = 0.0f;
     float currentPitchBend = 0.0f;
     float currentCcValues[128] = {};
+    double processingSampleRate = 44100.0;
     std::map<std::string, float> currentVstDialValues;
     std::vector<std::pair<std::string, std::string>> currentVstDialLayout;
 

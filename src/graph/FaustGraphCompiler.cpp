@@ -7,6 +7,7 @@
 #include <queue>
 #include <algorithm>
 #include <optional>
+#include <iomanip>
 
 namespace OrchFaust {
 
@@ -62,7 +63,7 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
         paramName == "reed_stiffness" || paramName == "bell_opening" ||
         paramName == "lips_tension" || paramName == "mouth_position" ||
         paramName == "strike_sharpness" || paramName == "t60" ||
-        paramName == "feedback" || paramName == "wet") return {0.0f, 1.0f, 0.01f};
+        paramName == "feedback" || paramName == "wet" || paramName == "normalize") return {0.0f, 1.0f, 0.01f};
     if (paramName == "strike_position") return {0.0f, 6.0f, 0.01f};
     if (paramName == "strike_cutoff") return {20.0f, 20000.0f, 1.0f};
     if (paramName == "velocity" || paramName == "scale" || paramName == "pitch_bend") return {-1.0f, 1.0f, 0.01f};
@@ -292,6 +293,9 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     // 3. Emit local UI sliders for parameters
     ss << "// Node Parameters\n";
     for (const auto& node : workingGraph.nodes) {
+        if (node.type == "output") {
+            continue;
+        }
         ss << "// Parameters for " << node.id << " (" << node.type << ")\n";
         for (const auto& [paramName, value] : node.params) {
             if (node.type == "cc" && paramName == "cc") {
@@ -538,6 +542,11 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
                    << ": fi.lowpass(2, max(1200.0, 12000.0 - (" << dampExpr << " * 9000.0))) "
                    << "* " << wetExpr << ")) : ma.tanh";
             }
+        }
+        else if (node.type == "body_convolution") {
+            // Body IR is now a native post-mix stage. Preserve legacy patch routing
+            // as a transparent node so it cannot generate a large Faust FIR.
+            ss << (inputsExpr.empty() ? "0.0" : inputsExpr);
         }
         else if (node.type == "resonator_reverb_loop") {
             std::string freqExpr = getTrackedFreqExpr();

@@ -187,12 +187,19 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::terminate() {
 }
 
 Steinberg::tresult PLUGIN_API OrchFaustProcessor::setupProcessing(Steinberg::Vst::ProcessSetup& newSetup) {
+    processingSampleRate = newSetup.sampleRate;
     voiceManager.prepare(newSetup.sampleRate, newSetup.maxSamplesPerBlock);
+    bodyConvolutionProcessor.prepare(newSetup.sampleRate, newSetup.maxSamplesPerBlock);
+    convolutionProcessor.prepare(newSetup.sampleRate, newSetup.maxSamplesPerBlock);
     return Steinberg::Vst::AudioEffect::setupProcessing(newSetup);
 }
 
 Steinberg::tresult PLUGIN_API OrchFaustProcessor::setActive(Steinberg::TBool state) {
     return Steinberg::Vst::AudioEffect::setActive(state);
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustProcessor::setProcessing(Steinberg::TBool state) {
+    return Steinberg::kResultOk;
 }
 
 Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::ProcessData& data) {
@@ -221,6 +228,8 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::Proces
             data.outputs[0].channelBuffers32[1]
         };
         voiceManager.process(outputs, data.numSamples);
+        bodyConvolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
+        convolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
     }
 
     return Steinberg::kResultOk;
@@ -291,7 +300,80 @@ void OrchFaustProcessor::processCompile() {
         }
     }
     
-    std::string dspCode = FaustGraphCompiler::compile(*optGraph, err);
+    Graph faustGraph = *optGraph;
+    std::vector<Node> convolutionNodes;
+    std::vector<Node> bodyConvolutionNodes;
+    std::set<std::string> convolutionNodeIds;
+    for (const auto& node : faustGraph.nodes) {
+        if (node.type == "convolution") {
+            convolutionNodes.push_back(node);
+            convolutionNodeIds.insert(node.id);
+        }
+        if (node.type == "body_convolution") bodyConvolutionNodes.push_back(node);
+    }
+    if (convolutionNodes.size() > 1) {
+        Logger::logWarning("Processor: Multiple Convolution nodes found; using the first post-mix node");
+    }
+    const Node* outputNode = nullptr;
+    for (const auto& node : faustGraph.nodes) {
+        if (node.id == faustGraph.outputNodeId) {
+            outputNode = &node;
+            break;
+        }
+    }
+    const bool bodyEnabled = outputNode && outputNode->params.count("body_enabled") &&
+        outputNode->params.at("body_enabled") >= 0.5f;
+    const bool roomEnabled = outputNode && outputNode->params.count("room_enabled") &&
+        outputNode->params.at("room_enabled") >= 0.5f;
+    if (bodyEnabled || !bodyConvolutionNodes.empty()) {
+        // Legacy Body Convolution nodes are processed after the voice mix so older
+        // patches remain usable without emitting IR samples into Faust source.
+        const Node* node = bodyEnabled ? outputNode : &bodyConvolutionNodes.front();
+        const std::string pathKey = bodyEnabled ? "body_ir_path" : "ir_path";
+        const std::string wetKey = bodyEnabled ? "body_wet" : "wet";
+        const std::string gainKey = bodyEnabled ? "body_gain" : "gain";
+        const std::string normalizeKey = bodyEnabled ? "body_normalize" : "normalize";
+        const auto pathIt = node->stringParams.find(pathKey);
+        const std::string irPath = pathIt == node->stringParams.end() ? "" : pathIt->second;
+        bodyConvolutionProcessor.setMix(node->params.count(wetKey) ? node->params.at(wetKey) : 0.5f,
+            node->params.count(gainKey) ? node->params.at(gainKey) : 1.0f);
+        std::string bodyError;
+        if (!bodyConvolutionProcessor.loadImpulseResponse(irPath,
+                !node->params.count(normalizeKey) || node->params.at(normalizeKey) >= 0.5f, bodyError)) {
+            Logger::logWarning("Processor: Body IR bypassed: ", bodyError);
+        }
+    } else {
+        bodyConvolutionProcessor.clear();
+    }
+    if (roomEnabled || !convolutionNodes.empty()) {
+        // Legacy standalone nodes are accepted so existing presets keep their room IR.
+        const Node* node = roomEnabled ? outputNode : &convolutionNodes.front();
+        const std::string pathKey = roomEnabled ? "room_ir_path" : "ir_path";
+        const std::string wetKey = roomEnabled ? "room_wet" : "wet";
+        const std::string gainKey = roomEnabled ? "room_gain" : "gain";
+        const std::string normalizeKey = roomEnabled ? "room_normalize" : "normalize";
+        const auto pathIt = node->stringParams.find(pathKey);
+        const std::string irPath = pathIt == node->stringParams.end() ? "" : pathIt->second;
+        const float wet = node->params.count(wetKey) ? node->params.at(wetKey) : 0.35f;
+        const float gain = node->params.count(gainKey) ? node->params.at(gainKey) : 1.0f;
+        const bool normalize = !node->params.count(normalizeKey) || node->params.at(normalizeKey) >= 0.5f;
+        convolutionProcessor.setMix(wet, gain);
+        std::string convolutionError;
+        if (!convolutionProcessor.loadImpulseResponse(irPath, normalize, convolutionError)) {
+            Logger::logWarning("Processor: Convolution bypassed: ", convolutionError);
+        }
+    } else {
+        convolutionProcessor.clear();
+    }
+
+    faustGraph.nodes.erase(std::remove_if(faustGraph.nodes.begin(), faustGraph.nodes.end(),
+        [](const Node& node) { return node.type == "convolution"; }), faustGraph.nodes.end());
+    faustGraph.connections.erase(std::remove_if(faustGraph.connections.begin(), faustGraph.connections.end(),
+        [&convolutionNodeIds](const Connection& connection) {
+            return convolutionNodeIds.count(connection.source) > 0 || convolutionNodeIds.count(connection.target) > 0;
+        }), faustGraph.connections.end());
+
+    std::string dspCode = FaustGraphCompiler::compile(faustGraph, err);
     if (dspCode.empty()) {
         Logger::logError("Processor: Faust code generation failed: ", err);
         return;

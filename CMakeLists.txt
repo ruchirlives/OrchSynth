@@ -64,6 +64,8 @@ set(SOURCE_FILES
     src/plugin/OrchFaustEntry.cpp
     src/dsp/FaustEngine.h
     src/dsp/FaustEngine.cpp
+    src/dsp/ConvolutionProcessor.h
+    src/dsp/ConvolutionProcessor.cpp
     src/dsp/Voice.h
     src/dsp/Voice.cpp
     src/dsp/VoiceManager.h
@@ -79,6 +81,12 @@ set(SOURCE_FILES
     src/osc/OscCommandQueue.cpp
     src/util/LockFreeQueue.h
     src/util/Logging.h
+    third_party/FFTConvolver/AudioFFT.h
+    third_party/FFTConvolver/AudioFFT.cpp
+    third_party/FFTConvolver/FFTConvolver.h
+    third_party/FFTConvolver/FFTConvolver.cpp
+    third_party/FFTConvolver/Utilities.h
+    third_party/FFTConvolver/Utilities.cpp
 )
 
 if(WIN32)
@@ -121,6 +129,8 @@ endif()
 target_include_directories(OrchSynth
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/FFTConvolver
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dr_libs
         ${FAUST_DIR}/include
 )
 
@@ -210,8 +220,12 @@ add_executable(test_faust
     src/dsp/FaustEngine.cpp
     src/dsp/Voice.cpp
     src/dsp/VoiceManager.cpp
+    src/dsp/ConvolutionProcessor.cpp
     src/graph/GraphParser.cpp
     src/graph/FaustGraphCompiler.cpp
+    third_party/FFTConvolver/AudioFFT.cpp
+    third_party/FFTConvolver/FFTConvolver.cpp
+    third_party/FFTConvolver/Utilities.cpp
 )
 target_link_libraries(test_faust
     PRIVATE
@@ -221,6 +235,8 @@ target_link_libraries(test_faust
 target_include_directories(test_faust
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/FFTConvolver
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dr_libs
         ${FAUST_DIR}/include
 )
 add_custom_command(TARGET test_faust POST_BUILD

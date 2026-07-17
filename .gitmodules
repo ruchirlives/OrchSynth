@@ -1,0 +1,6 @@
+[submodule "third_party/FFTConvolver"]
+	path = third_party/FFTConvolver
+	url = https://github.com/HiFi-LoFi/FFTConvolver.git
+[submodule "third_party/dr_libs"]
+	path = third_party/dr_libs
+	url = https://github.com/mackron/dr_libs.git

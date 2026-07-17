@@ -101,6 +101,13 @@ Node parseNodeJson(const json& jNode) {
             }
         }
     }
+    if (jNode.contains("stringParams") && jNode["stringParams"].is_object()) {
+        for (auto& el : jNode["stringParams"].items()) {
+            if (el.value().is_string()) {
+                node.stringParams[el.key()] = el.value().get<std::string>();
+            }
+        }
+    }
     if (jNode.contains("group") && jNode["group"].is_object()) {
         node.group = parseGroupJson(jNode["group"]);
     }

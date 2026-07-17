@@ -17,6 +17,8 @@ struct Node {
     float y = 0.0f;
     bool hasPosition = false;
     std::map<std::string, float> params;
+    std::map<std::string, std::string> stringParams;
+    std::vector<float> irSamples;
     std::shared_ptr<GroupDefinition> group;
 };
 

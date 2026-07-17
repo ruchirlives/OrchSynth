@@ -1,4 +1,7 @@
 #include <iostream>
+#include <cmath>
+#include <fstream>
+#include <filesystem>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -11,6 +14,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #include "graph/GraphParser.h"
 #include "graph/FaustGraphCompiler.h"
 #include "dsp/VoiceManager.h"
+#include "dsp/ConvolutionProcessor.h"
 #include "util/Logging.h"
 #include "faust/dsp/llvm-dsp.h"
 
@@ -38,8 +42,98 @@ static std::string getDllDir() {
 #endif
 }
 
+static void writeU16(std::ofstream& output, std::uint16_t value) {
+    output.put(static_cast<char>(value & 0xFF));
+    output.put(static_cast<char>((value >> 8) & 0xFF));
+}
+
+static void writeU32(std::ofstream& output, std::uint32_t value) {
+    for (int shift = 0; shift < 32; shift += 8) output.put(static_cast<char>((value >> shift) & 0xFF));
+}
+
+static bool writeIdentityWav(const std::filesystem::path& path) {
+    std::ofstream output(path, std::ios::binary);
+    if (!output) return false;
+    output.write("RIFF", 4);
+    writeU32(output, 38);
+    output.write("WAVEfmt ", 8);
+    writeU32(output, 16);
+    writeU16(output, 1);
+    writeU16(output, 1);
+    writeU32(output, 48000);
+    writeU32(output, 96000);
+    writeU16(output, 2);
+    writeU16(output, 16);
+    output.write("data", 4);
+    writeU32(output, 2);
+    writeU16(output, 32767);
+    return static_cast<bool>(output);
+}
+
 int main() {
     std::cout << "==================================================" << std::endl;
+
+    const auto irPath = std::filesystem::temp_directory_path() / "orchsynth_identity_ir.wav";
+    if (!writeIdentityWav(irPath)) {
+        std::cout << "FAILED: Could not create convolution test WAV." << std::endl;
+        return 1;
+    }
+    OrchFaust::ConvolutionProcessor convolution;
+    convolution.prepare(48000.0, 256);
+    convolution.setMix(1.0f, 1.0f);
+    std::string convolutionError;
+    if (!convolution.loadImpulseResponse(irPath.string(), false, convolutionError)) {
+        std::cout << "FAILED: Convolution IR load failed: " << convolutionError << std::endl;
+        std::filesystem::remove(irPath);
+        return 1;
+    }
+    std::vector<float> convolutionLeft(256, 0.0f);
+    std::vector<float> convolutionRight(256, 0.0f);
+    convolutionLeft[0] = 0.5f;
+    convolutionRight[0] = -0.25f;
+    convolution.process(convolutionLeft.data(), convolutionRight.data(), 256);
+    std::filesystem::remove(irPath);
+    if (std::abs(convolutionLeft[0] - 0.5f) > 0.001f || std::abs(convolutionRight[0] + 0.25f) > 0.001f) {
+        std::cout << "FAILED: Identity convolution did not preserve stereo samples." << std::endl;
+        return 1;
+    }
+    std::cout << "SUCCESS: Native WAV convolution passed identity test." << std::endl;
+
+    const std::string convolutionGraph = R"({
+        "nodes": [
+            {"id": "ir", "type": "convolution", "params": {"wet": 0.4}, "stringParams": {"ir_path": "C:/IRs/room.wav"}},
+            {"id": "out", "type": "output", "params": {}}
+        ],
+        "connections": [],
+        "output": "out"
+    })";
+    auto parsedConvolutionGraph = OrchFaust::GraphParser::parse(convolutionGraph, convolutionError);
+    if (!parsedConvolutionGraph || parsedConvolutionGraph->nodes[0].stringParams["ir_path"] != "C:/IRs/room.wav") {
+        std::cout << "FAILED: Graph parser did not preserve convolution IR path." << std::endl;
+        return 1;
+    }
+    std::cout << "SUCCESS: Graph parser preserves convolution IR paths." << std::endl;
+
+    OrchFaust::Graph bodyGraph;
+    bodyGraph.name = "Body Convolution Test";
+    bodyGraph.outputNodeId = "out";
+    OrchFaust::Node noiseNode;
+    noiseNode.id = "noise";
+    noiseNode.type = "noise";
+    OrchFaust::Node bodyNode;
+    bodyNode.id = "body";
+    bodyNode.type = "body_convolution";
+    bodyNode.params = {{"wet", 1.0f}, {"gain", 1.0f}, {"normalize", 1.0f}};
+    OrchFaust::Node bodyOutput;
+    bodyOutput.id = "out";
+    bodyOutput.type = "output";
+    bodyGraph.nodes = {noiseNode, bodyNode, bodyOutput};
+    bodyGraph.connections = {{"noise", "body", "", "", ""}, {"body", "out", "", "", ""}};
+    const std::string bodyCode = OrchFaust::FaustGraphCompiler::compile(bodyGraph, convolutionError);
+    if (bodyCode.empty() || bodyCode.find("node_body = node_noise") == std::string::npos || bodyCode.find("fi.fir") != std::string::npos) {
+        std::cout << "FAILED: Legacy Body Convolution graph was not safely bypassed." << std::endl;
+        return 1;
+    }
     std::cout << "  OrchFaustSynth Integration Test Harness" << std::endl;
     std::cout << "==================================================" << std::endl;
 
@@ -151,6 +245,15 @@ int main() {
     std::vector<const char*> argv;
     argv.push_back("-I");
     argv.push_back(importPath.c_str());
+
+    llvm_dsp_factory* bodyFactory = createDSPFactoryFromString(
+        "OrchFaustBodyConvolutionTest", bodyCode, static_cast<int>(argv.size()), argv.data(), "", convolutionError, -1);
+    if (!bodyFactory) {
+        std::cout << "FAILED: Body Convolution Faust JIT failed: " << convolutionError << "\n" << bodyCode << std::endl;
+        return 1;
+    }
+    deleteDSPFactory(bodyFactory);
+    std::cout << "SUCCESS: Body Convolution graph JIT compiles." << std::endl;
 
     // 5. Compile JIT binary using libfaust LLVM directly
     std::cout << "[Step 3] Compiling JIT binary using libfaust LLVM..." << std::endl;
