@@ -47,6 +47,15 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
         return {20.0f, 10000.0f, 0.1f};
     }
     if (paramName == "keyboard_tracking") return {0.0f, 1.0f, 1.0f};
+    if (nodeType == "temperament_tuning") {
+        if (paramName == "mode") return {0.0f, 2.0f, 1.0f};
+        if (paramName == "tuning") return {0.0f, 1.0f, 0.01f};
+        if (paramName == "tuning_preset") return {0.0f, 3.0f, 1.0f};
+        if (paramName.rfind("cent_", 0) == 0) return {-100.0f, 100.0f, 0.001f};
+        if (paramName == "root_note") return {0.0f, 11.0f, 1.0f};
+        if (paramName == "root") return {0.0f, 11.0f, 1.0f};
+        if (paramName == "scale_amount" || paramName == "scale") return {0.0f, 1.0f, 0.01f};
+    }
     if (paramName == "cutoff") return {20.0f, 20000.0f, 1.0f};
     if (paramName == "resonance") return {0.1f, 20.0f, 0.01f};
     if (paramName == "gain") return {0.0f, 20000.0f, 0.1f};
@@ -274,7 +283,7 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "voice_gate = hslider(\"gate\", 0, 0, 1, 1);\n";
     ss << "velocity = hslider(\"velocity\", 1, 0, 1, 0.000001);\n";
     ss << "release_velocity = hslider(\"release_velocity\", 0, 0, 1, 0.000001);\n";
-    ss << "note_number = hslider(\"note_number\", 69, 0, 127, 0.000001);\n";
+    ss << "note_number = hslider(\"note_number\", -1, -1, 127, 0.000001);\n";
     ss << "note_frequency = hslider(\"note_frequency\", 440, 0, 24000, 0.000001);\n";
     ss << "note_pressure = hslider(\"note_pressure\", 0, 0, 1, 0.000001);\n";
     ss << "channel_pressure = hslider(\"channel_pressure\", 0, 0, 1, 0.000001);\n";
@@ -284,6 +293,26 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "note_expression = hslider(\"note_expression\", 0, 0, 1, 0.000001);\n";
     ss << "aftertouch = hslider(\"aftertouch\", 0, 0, 1, 0.000001);\n";
     ss << "pitch_bend = hslider(\"pitch_bend\", 0, -1, 1, 0.000001);\n";
+    ss << "\n// Temperament tuning module. Mode: 0=disabled, 1=equal, 2=just.\n";
+    ss << "positivePitchClass(note, root) = ((int(note) - int(root)) % 12 + 12) % 12;\n";
+    ss << "justCorrection(pc) = "
+          "(pc == 1) * (12.0 * log(16.0/15.0) / log(2.0) - 1.0) + "
+          "(pc == 2) * (12.0 * log(9.0/8.0) / log(2.0) - 2.0) + "
+          "(pc == 3) * (12.0 * log(6.0/5.0) / log(2.0) - 3.0) + "
+          "(pc == 4) * (12.0 * log(5.0/4.0) / log(2.0) - 4.0) + "
+          "(pc == 5) * (12.0 * log(4.0/3.0) / log(2.0) - 5.0) + "
+          "(pc == 6) * (12.0 * log(45.0/32.0) / log(2.0) - 6.0) + "
+          "(pc == 7) * (12.0 * log(3.0/2.0) / log(2.0) - 7.0) + "
+          "(pc == 8) * (12.0 * log(8.0/5.0) / log(2.0) - 8.0) + "
+          "(pc == 9) * (12.0 * log(5.0/3.0) / log(2.0) - 9.0) + "
+          "(pc == 10) * (12.0 * log(9.0/5.0) / log(2.0) - 10.0) + "
+          "(pc == 11) * (12.0 * log(15.0/8.0) / log(2.0) - 11.0);\n";
+    ss << "tableCorrection(pc,c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11) = "
+          "(pc==0)*c0+(pc==1)*c1+(pc==2)*c2+(pc==3)*c3+(pc==4)*c4+(pc==5)*c5+"
+          "(pc==6)*c6+(pc==7)*c7+(pc==8)*c8+(pc==9)*c9+(pc==10)*c10+(pc==11)*c11;\n";
+    ss << "temperamentTuning(note, mode, root, amount,c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11) = note, pc, correction with { "
+          "pc = positivePitchClass(note, root); "
+          "correction = (note >= 0) * (int(mode) == 2) * amount * tableCorrection(pc,c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11) / 100.0; };\n";
     for (int cc = 0; cc < 128; ++cc) {
         ss << "cc_" << cc << " = hslider(\"cc_" << cc << "\", 0, 0, 1, 0.000001);\n";
     }
@@ -339,6 +368,17 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "// DSP Signal Flow\n";
     auto sourceExpr = [&](const Connection& conn) {
         const Node* sourceNode = nodeMap.at(conn.source);
+        if (sourceNode->type == "temperament_tuning") {
+            if (conn.sourceHandle == "output-0" || conn.sourceHandle.empty()) {
+                return std::string("node_") + conn.source + "_note";
+            }
+            if (conn.sourceHandle == "output-1") {
+                return std::string("node_") + conn.source + "_pitch_class";
+            }
+            if (conn.sourceHandle == "output-2") {
+                return std::string("node_") + conn.source + "_correction";
+            }
+        }
         if (conn.sourceHandle == "output-1" && sourceNode->type == "adsr") {
             return std::string("node_env_") + conn.source;
         }
@@ -420,6 +460,42 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             return getParamExpr("freq", "440.0");
         };
         
+        if (node.type == "temperament_tuning") {
+            const bool usesLegacyContract = node.params.count("mode") == 0 && node.params.count("tuning") > 0;
+            const std::string modeExpr = usesLegacyContract
+                ? "((" + getParamExpr("tuning", "0.0") + ") >= 0.5) * 2.0"
+                : getParamExpr("mode", "0.0");
+            const std::string rootExpr = node.params.count("root_note") > 0
+                ? getParamExpr("root_note", "0.0") : getParamExpr("root", "0.0");
+            const std::string amountExpr = node.params.count("scale_amount") > 0
+                ? getParamExpr("scale_amount", "1.0") : getParamExpr("scale", "1.0");
+            const std::string tuningCall = "temperamentTuning(note_number, " + modeExpr +
+                ", " + rootExpr + ", " + amountExpr +
+                ", " + getParamExpr("cent_0", "0.0") +
+                ", " + getParamExpr("cent_1", "11.731") +
+                ", " + getParamExpr("cent_2", "3.910") +
+                ", " + getParamExpr("cent_3", "15.641") +
+                ", " + getParamExpr("cent_4", "-13.686") +
+                ", " + getParamExpr("cent_5", "-1.955") +
+                ", " + getParamExpr("cent_6", "-9.776") +
+                ", " + getParamExpr("cent_7", "1.955") +
+                ", " + getParamExpr("cent_8", "13.686") +
+                ", " + getParamExpr("cent_9", "-15.641") +
+                ", " + getParamExpr("cent_10", "17.596") +
+                ", " + getParamExpr("cent_11", "-11.731") + ")";
+            ss << "node_" << nodeId << "_note_raw = " << tuningCall << " : _,!,!;\n";
+            ss << "node_" << nodeId << "_pitch_class_raw = " << tuningCall << " : !,_,!;\n";
+            ss << "node_" << nodeId << "_correction_raw = " << tuningCall << " : !,!,_;\n";
+            ss << "node_" << nodeId << "_note = node_" << nodeId << "_note_raw;\n";
+            ss << "node_" << nodeId << "_pitch_class = node_" << nodeId << "_pitch_class_raw;\n";
+            ss << "node_" << nodeId << "_correction = attach(attach(attach(node_" << nodeId
+               << "_correction_raw, node_" << nodeId << "_correction_raw : hbargraph(\"debug_" << nodeId
+               << "_correction\", -1, 1)), node_" << nodeId << "_note_raw : hbargraph(\"debug_" << nodeId
+               << "_note\", -1, 127)), node_" << nodeId << "_pitch_class_raw : hbargraph(\"debug_" << nodeId
+               << "_pitch_class\", 0, 11));\n";
+            ss << "node_" << nodeId << " = node_" << nodeId << "_note;\n";
+            continue;
+        }
         if (node.type == "adsr") {
             ss << "node_env_" << nodeId << " = ";
         } else {

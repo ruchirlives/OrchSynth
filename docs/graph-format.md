@@ -44,6 +44,7 @@ distinct source steps.
 * `gate`: The current voice gate.
 * `cc`: Channel controller selected by the `cc` parameter, normalized to 0..1.
 * `debug`: Transparent runtime signal probe; its input is passed through unchanged and displayed in the editor.
+* `temperament_tuning`: Faust-backed tuning source driven directly by the voice's live MIDI note. Parameters: `mode` (`0` disabled, `1` equal temperament, `2` just intonation), `root_note` (`0..11`, C through B), and `scale_amount` (`0..1`). The live frontend's legacy names `tuning` (`0..1`, values at or above `0.5` select just intonation), `root`, and `scale` are also accepted. Outputs: `output-0` NOTE, `output-1` PITCH CLASS relative to the root, and `output-2` CORRECTION in semitones. Connect CORRECTION to an oscillator's `param-freq` input so it is applied to pitch before waveform generation.
 
 ### Advanced / Physical Modeling
 * `karplus_string`: Karplus-Strong string generator. Parameters: `freq`, `damping`.

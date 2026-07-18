@@ -17,6 +17,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 #include "dsp/ConvolutionProcessor.h"
 #include "util/Logging.h"
 #include "faust/dsp/llvm-dsp.h"
+#include "faust/gui/MapUI.h"
 
 // Helper to get directory of current module
 static std::string getDllDir() {
@@ -143,6 +144,17 @@ int main() {
         "name": "TestPatch",
         "nodes": [
             {
+                "id": "tuning1",
+                "type": "temperament_tuning",
+                "params": {
+                    "mode": 0.0,
+                    "root_note": 0.0,
+                    "scale_amount": 1.0,
+                    "cent_2": 3.910,
+                    "cent_4": -13.686
+                }
+            },
+            {
                 "id": "osc1",
                 "type": "sine",
                 "params": {
@@ -199,6 +211,12 @@ int main() {
             }
         ],
         "connections": [
+            {
+                "source": "tuning1",
+                "sourceHandle": "output-2",
+                "target": "osc1",
+                "targetHandle": "param-freq"
+            },
             {
                 "source": "osc1",
                 "target": "debug1"
@@ -296,6 +314,74 @@ int main() {
     std::cout << "[Step 5] Initializing DSP at 48kHz..." << std::endl;
     dsp->init(48000);
     std::cout << "   SUCCESS: DSP initialized." << std::endl;
+
+    MapUI tuningUI;
+    dsp->buildUserInterface(&tuningUI);
+    auto findZone = [&](const std::string& suffix) -> FAUSTFLOAT* {
+        for (const auto& [path, zone] : tuningUI.getFullpathMap()) {
+            if (path.size() >= suffix.size() && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                return zone;
+            }
+        }
+        return nullptr;
+    };
+    FAUSTFLOAT* noteZone = findZone("/note_number");
+    FAUSTFLOAT* modeZone = findZone("/tuning1_mode");
+    FAUSTFLOAT* rootZone = findZone("/tuning1_root_note");
+    FAUSTFLOAT* amountZone = findZone("/tuning1_scale_amount");
+    FAUSTFLOAT* customFourthZone = findZone("/tuning1_cent_4");
+    FAUSTFLOAT* playedMeter = findZone("/debug_tuning1_note");
+    FAUSTFLOAT* pitchClassMeter = findZone("/debug_tuning1_pitch_class");
+    FAUSTFLOAT* correctionMeter = findZone("/debug_tuning1_correction");
+    if (!noteZone || !modeZone || !rootZone || !amountZone || !customFourthZone || !playedMeter || !pitchClassMeter || !correctionMeter) {
+        std::cout << "FAILED: Temperament controls or debug outputs were not exposed by Faust." << std::endl;
+        delete dsp;
+        deleteDSPFactory(factory);
+        return 1;
+    }
+
+    const int tuningFrames = 8;
+    std::vector<float> tuningLeft(tuningFrames, 0.0f);
+    std::vector<float> tuningRight(tuningFrames, 0.0f);
+    float* tuningOutputs[2] = {tuningLeft.data(), tuningRight.data()};
+    auto runTuningCase = [&](float note, float mode, float root, float amount,
+                             float expectedPitchClass, float expectedCorrection,
+                             const char* label) -> bool {
+        *noteZone = note;
+        *modeZone = mode;
+        *rootZone = root;
+        *amountZone = amount;
+        dsp->compute(tuningFrames, nullptr, tuningOutputs);
+        const bool passed = std::abs(static_cast<float>(*playedMeter) - note) < 0.001f &&
+            std::abs(static_cast<float>(*pitchClassMeter) - expectedPitchClass) < 0.001f &&
+            std::abs(static_cast<float>(*correctionMeter) - expectedCorrection) < 0.001f;
+        if (!passed) {
+            std::cout << "FAILED: " << label << " (note=" << *playedMeter
+                      << ", pitchClass=" << *pitchClassMeter
+                      << ", correction=" << *correctionMeter << ")" << std::endl;
+        }
+        return passed;
+    };
+    const float majorThirdCorrection = static_cast<float>(12.0 * std::log2(5.0 / 4.0) - 4.0);
+    const float majorSecondCorrection = static_cast<float>(12.0 * std::log2(9.0 / 8.0) - 2.0);
+    if (!runTuningCase(-1.0f, 2.0f, 0.0f, 1.0f, 11.0f, 0.0f, "no note bypass") ||
+        !runTuningCase(64.0f, 1.0f, 0.0f, 1.0f, 4.0f, 0.0f, "equal temperament") ||
+        !runTuningCase(64.0f, 2.0f, 0.0f, 1.0f, 4.0f, majorThirdCorrection, "just major third") ||
+        !runTuningCase(76.0f, 2.0f, 0.0f, 1.0f, 4.0f, majorThirdCorrection, "multiple octaves") ||
+        !runTuningCase(64.0f, 2.0f, 2.0f, 1.0f, 2.0f, majorSecondCorrection, "root note change") ||
+        !runTuningCase(64.0f, 0.0f, 0.0f, 1.0f, 4.0f, 0.0f, "disabled tuning") ||
+        !runTuningCase(64.0f, 2.0f, 0.0f, 0.5f, 4.0f, majorThirdCorrection * 0.5f, "scale amount")) {
+        delete dsp;
+        deleteDSPFactory(factory);
+        return 1;
+    }
+    *customFourthZone = 25.0f;
+    if (!runTuningCase(64.0f, 2.0f, 0.0f, 1.0f, 4.0f, 0.25f, "custom graph cents")) {
+        delete dsp;
+        deleteDSPFactory(factory);
+        return 1;
+    }
+    std::cout << "SUCCESS: Faust temperament tuning cases passed." << std::endl;
 
     // 8. Process one block of audio
     const int numFrames = 256;
