@@ -36,6 +36,9 @@ Upload the newly compiled setup installer directly to the **plugins** page tab o
 & E:\CODINGPROJECTS\Python\orch\.venv-runtime\Scripts\python.exe E:\CODINGPROJECTS\Python\orch\tools\gumroad_upload\gumroad_upload.py attach 'Yh1x5FDZsQ77s6tKin33zQ==' 'E:\CODINGPROJECTS\C++\OrchSynth\installer\OrchSynth-Setup.exe' --file-name 'OrchSynth-Setup.exe' --description 'Windows standalone VST3 plugin setup installer for OrchSynth v<VERSION>' --page 'plugins'
 ```
 
+> [!IMPORTANT]
+> When executing the upload command above, ensure you replace `<VERSION>` in the description and command parameters with the actual release version (e.g., `v3.6.2`) to maintain consistent version numbers across all files on Gumroad.
+
 ---
 
 ## 4. Reorder layouts
