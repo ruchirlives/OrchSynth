@@ -1,7 +1,7 @@
 [Setup]
 AppId={{B3E4C8A1-5F2D-4E6A-9C7B-1D8F3A2E4B6C}
 AppName=OrchSynth
-AppVersion=1.0.0
+AppVersion=2.0.0
 AppPublisher=OrchSynth
 DefaultDirName={autopf}\OrchSynth
 DefaultGroupName=OrchSynth

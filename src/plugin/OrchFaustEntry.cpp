@@ -6,7 +6,7 @@
 
 // Define VST3 plug-in details
 #ifndef VERSION_STR
-#define VERSION_STR "1.0.0"
+#define VERSION_STR "2.0.0"
 #endif
 
 BEGIN_FACTORY_DEF("Orch", "https://github.com/ruchirlives", "")
