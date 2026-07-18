@@ -72,6 +72,25 @@ process that may have loaded:
 C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\x86_64-win\OrchSynth.vst3
 ```
 
+## Layout-Only Reload
+
+When the user asks to reload after changing GUI positioning, a layout reload
+means:
+
+1. Copy `resources\gui\orch_gui_layout.json` to:
+   `C:\Program Files\Common Files\VST3\OrchSynth.vst3\Contents\x86_64-win\gui\orch_gui_layout.json`
+   and verify the source and destination hashes match.
+2. Capture the live VST state and current bridge routing.
+3. Close the editor and remove the active OrchSynth plugin node from the bridge
+   routing graph so the instance is unloaded cleanly.
+4. Restore the original routing graph, wait for the plugin to load, and restore
+   the captured state.
+5. Reopen the editor and verify that state restoration succeeded.
+
+No VST3 binary replacement is required for a layout-only reload. The layout
+JSON must be copied before the plugin instance is recreated so the reopened
+editor reads the new positions.
+
 ## Build Verification
 
 After code changes, build the plug-in target:

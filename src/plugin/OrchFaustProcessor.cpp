@@ -230,6 +230,19 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::Proces
         voiceManager.process(outputs, data.numSamples);
         bodyConvolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
         convolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
+
+        // Publish a mono snapshot of the final plug-in output for the editor.
+        // Atomic samples keep the audio thread independent from UI/message locks.
+        if (data.numSamples > 0) {
+            for (std::size_t i = 0; i < kWaveformSampleCount; ++i) {
+                const auto sourceIndex = (std::min)(
+                    static_cast<Steinberg::int32>((i * static_cast<std::size_t>(data.numSamples)) /
+                                                  kWaveformSampleCount),
+                    data.numSamples - 1);
+                const float mono = 0.5f * (outputs[0][sourceIndex] + outputs[1][sourceIndex]);
+                outputWaveform[i].store(std::isfinite(mono) ? mono : 0.0f, std::memory_order_relaxed);
+            }
+        }
     }
 
     return Steinberg::kResultOk;
@@ -328,10 +341,13 @@ void OrchFaustProcessor::processCompile() {
         outputNode->params.at("body_enabled") >= 0.5f;
     const bool roomEnabled = outputNode && outputNode->params.count("room_enabled") &&
         outputNode->params.at("room_enabled") >= 0.5f;
-    if (bodyEnabled || !bodyConvolutionNodes.empty()) {
+    const Node* standaloneBodyNode = bodyConvolutionNodes.empty() ? nullptr : &bodyConvolutionNodes.front();
+    const bool standaloneBodyEnabled = standaloneBodyNode &&
+        (!standaloneBodyNode->params.count("body_enabled") || standaloneBodyNode->params.at("body_enabled") >= 0.5f);
+    if (bodyEnabled || standaloneBodyEnabled) {
         // Legacy Body Convolution nodes are processed after the voice mix so older
         // patches remain usable without emitting IR samples into Faust source.
-        const Node* node = bodyEnabled ? outputNode : &bodyConvolutionNodes.front();
+        const Node* node = bodyEnabled ? outputNode : standaloneBodyNode;
         const std::string pathKey = bodyEnabled ? "body_ir_path" : "ir_path";
         const std::string wetKey = bodyEnabled ? "body_wet" : "wet";
         const std::string gainKey = bodyEnabled ? "body_gain" : "gain";
@@ -495,6 +511,25 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::notify(Steinberg::Vst::IMessag
         return Steinberg::kResultOk;
     }
 
+    if (strcmp(message->getMessageID(), "GetGraphState") == 0) {
+        notifyGraphState();
+        return Steinberg::kResultOk;
+    }
+
+    if (strcmp(message->getMessageID(), "GetWaveform") == 0) {
+        if (auto* reply = allocateMessage()) {
+            std::array<float, kWaveformSampleCount> snapshot {};
+            for (std::size_t i = 0; i < snapshot.size(); ++i) {
+                snapshot[i] = outputWaveform[i].load(std::memory_order_relaxed);
+            }
+            reply->setMessageID("Waveform");
+            reply->getAttributes()->setBinary("samples", snapshot.data(),
+                static_cast<Steinberg::uint32>(snapshot.size() * sizeof(float)));
+            sendMessage(reply);
+        }
+        return Steinberg::kResultOk;
+    }
+
     if (strcmp(message->getMessageID(), "SetVstDial") == 0) {
         Steinberg::Vst::TChar keyChars[256] = {};
         double value = 0.0;
@@ -540,6 +575,15 @@ void OrchFaustProcessor::notifyDialLayoutChanged() {
         }
         auto layoutText = toTCharString(layout);
         reply->getAttributes()->setString("layout", layoutText.data());
+        sendMessage(reply);
+    }
+}
+
+void OrchFaustProcessor::notifyGraphState() {
+    if (auto* reply = allocateMessage()) {
+        reply->setMessageID("GraphState");
+        auto graph = toTCharString(currentGraphJson);
+        reply->getAttributes()->setString("graph", graph.data());
         sendMessage(reply);
     }
 }

@@ -69,7 +69,7 @@ const char* PRESET_SINE = R"({
     { "source": "osc1", "target": "gain1" },
     { "source": "gain1", "target": "out1" }
   ],
-  "output": "gain1"
+  "output": "out1"
 })";
 
 const char* PRESET_SAW = R"({
@@ -86,7 +86,7 @@ const char* PRESET_SAW = R"({
     { "source": "filter1", "target": "gain1" },
     { "source": "gain1", "target": "out1" }
   ],
-  "output": "gain1"
+  "output": "out1"
 })";
 
 const char* PRESET_PLUCK = R"({
@@ -109,7 +109,7 @@ const char* PRESET_PLUCK = R"({
     { "source": "body1", "target": "gain1" },
     { "source": "gain1", "target": "out1" }
   ],
-  "output": "gain1"
+  "output": "out1"
 })";
 
 #if defined(_WIN32)
@@ -868,6 +868,22 @@ void OrchFaustController::requestDialLayout() {
     }
 }
 
+void OrchFaustController::requestGraphState() {
+    if (auto* msg = allocateMessage()) {
+        msg->setMessageID("GetGraphState");
+        sendMessage(msg);
+    }
+}
+
+void OrchFaustController::requestWaveform() {
+    if (activeView) {
+        if (auto* msg = allocateMessage()) {
+            msg->setMessageID("GetWaveform");
+            sendMessage(msg);
+        }
+    }
+}
+
 void OrchFaustController::setCurrentPatchName(std::string name) {
     currentPatchName = std::move(name);
     if (activeView) {
@@ -936,6 +952,26 @@ Steinberg::tresult PLUGIN_API OrchFaustController::notify(Steinberg::Vst::IMessa
             if (activeView) {
                 activeView->updateDialLayout(layout);
             }
+        }
+        return Steinberg::kResultOk;
+    }
+
+    if (strcmp(message->getMessageID(), "GraphState") == 0) {
+        Steinberg::Vst::TChar graph[16384] = {};
+        if (message->getAttributes()->getString("graph", graph, sizeof(graph)) == Steinberg::kResultOk && activeView) {
+            activeView->updateGraphState(fromTCharString(graph));
+        }
+        return Steinberg::kResultOk;
+    }
+
+
+    if (strcmp(message->getMessageID(), "Waveform") == 0) {
+        const void* data = nullptr;
+        Steinberg::uint32 size = 0;
+        if (message->getAttributes()->getBinary("samples", data, size) == Steinberg::kResultOk &&
+            data && size >= sizeof(float) && size % sizeof(float) == 0 && activeView) {
+            const auto* samples = static_cast<const float*>(data);
+            activeView->updateWaveform(std::vector<float>(samples, samples + size / sizeof(float)));
         }
         return Steinberg::kResultOk;
     }

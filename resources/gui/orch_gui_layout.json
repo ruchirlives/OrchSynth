@@ -61,7 +61,7 @@
       "x": 50,
       "y": 50,
       "w": 62,
-      "h": 62,
+      "h": 60,
       "label": "PLAY",
       "type": "play"
     },
@@ -132,9 +132,9 @@
     },
     "webEditorButton": {
       "parent": "leftRail",
-      "x": 40,
+      "x": 50,
       "y": 328,
-      "w": 94,
+      "w": 80,
       "h": 24,
       "label": "WEB EDITOR",
       "type": "control"
@@ -171,13 +171,22 @@
       "x": 172,
       "y": 56,
       "w": 202,
-      "h": 136,
+      "h": 72,
       "label": "Patch scope",
       "type": "scope"
     },
+    "scopeWaveform": {
+      "parent": "centerPanel",
+      "x": 172,
+      "y": 134,
+      "w": 202,
+      "h": 52,
+      "label": "Animated waveform",
+      "type": "waveform"
+    },
     "brand": {
       "parent": "centerPanel",
-      "x": 156,
+      "x": 154,
       "y": 402,
       "w": 230,
       "h": 20,
@@ -256,32 +265,103 @@
       "label": "Graph dial 6",
       "type": "dial"
     },
-    "extraDial4": {
-      "parent": "extraDialPanel",
-      "x": 152,
-      "y": 304,
-      "w": 76,
-      "h": 90,
-      "label": "Graph dial 7",
-      "type": "dial"
+    "irTitle": {
+      "parent": "centerPanel",
+      "x": 245,
+      "y": 305,
+      "w": 50,
+      "h": 14,
+      "label": "IR FILES",
+      "type": "label",
+      "z": 1
     },
-    "extraDial5": {
-      "parent": "extraDialPanel",
-      "x": 228,
+    "irPanel": {
+      "parent": "centerPanel",
+      "x": 153,
       "y": 304,
-      "w": 76,
-      "h": 90,
-      "label": "Graph dial 8",
-      "type": "dial"
+      "w": 230,
+      "h": 102,
+      "label": "IR files panel",
+      "type": "panel",
+      "asset": "orch_ir_panel_fit.png"
     },
-    "extraDial6": {
-      "parent": "extraDialPanel",
-      "x": 306,
-      "y": 304,
-      "w": 76,
-      "h": 90,
-      "label": "Graph dial 9",
-      "type": "dial"
+    "bodyIrLabel": {
+      "parent": "centerPanel",
+      "x": 160,
+      "y": 318,
+      "w": 220,
+      "h": 18,
+      "label": "BODY: No IR selected",
+      "type": "label"
+    },
+    "bodyIrEnabled": {
+      "parent": "centerPanel",
+      "x": 206,
+      "y": 336,
+      "w": 38,
+      "h": 22,
+      "label": "OFF",
+      "type": "control",
+      "fontSize": 7
+    },
+    "bodyIrBrowse": {
+      "parent": "centerPanel",
+      "x": 246,
+      "y": 336,
+      "w": 48,
+      "h": 22,
+      "label": "BROWSE",
+      "type": "control",
+      "fontSize": 7
+    },
+    "bodyIrNormalize": {
+      "parent": "centerPanel",
+      "x": 296,
+      "y": 336,
+      "w": 36,
+      "h": 22,
+      "label": "NORM",
+      "type": "control",
+      "fontSize": 7
+    },
+    "roomIrLabel": {
+      "parent": "centerPanel",
+      "x": 160,
+      "y": 359,
+      "w": 220,
+      "h": 18,
+      "label": "ROOM: No IR selected",
+      "type": "label"
+    },
+    "roomIrEnabled": {
+      "parent": "centerPanel",
+      "x": 206,
+      "y": 377,
+      "w": 38,
+      "h": 22,
+      "label": "OFF",
+      "type": "control",
+      "fontSize": 7
+    },
+    "roomIrBrowse": {
+      "parent": "centerPanel",
+      "x": 246,
+      "y": 377,
+      "w": 48,
+      "h": 22,
+      "label": "BROWSE",
+      "type": "control",
+      "fontSize": 7
+    },
+    "roomIrNormalize": {
+      "parent": "centerPanel",
+      "x": 296,
+      "y": 377,
+      "w": 36,
+      "h": 22,
+      "label": "NORM",
+      "type": "control",
+      "fontSize": 7
     }
   }
 }

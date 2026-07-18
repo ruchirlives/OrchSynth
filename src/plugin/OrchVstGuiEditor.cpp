@@ -8,6 +8,7 @@
 #include "vstgui/lib/cfont.h"
 #include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cgradient.h"
+#include "vstgui/lib/cfileselector.h"
 #include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/cviewcontainer.h"
 #include "vstgui/lib/cvstguitimer.h"
@@ -16,10 +17,12 @@
 #include "vstgui/lib/controls/ctextlabel.h"
 
 #if defined(_WIN32)
-#include "vstgui/lib/platform/win32/win32factory.h"
-#include <shlobj.h>
 #include <windows.h>
+#include "vstgui/lib/platform/win32/win32factory.h"
+#include <commdlg.h>
+#include <shlobj.h>
 #include <shellapi.h>
+#pragma comment(lib, "Comdlg32.lib")
 #endif
 
 #include <algorithm>
@@ -29,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <utility>
 
@@ -48,6 +52,12 @@ constexpr int32_t kTagReloadPreset = 1003;
 constexpr int32_t kTagOpenEditor = 1004;
 constexpr int32_t kTagRefreshState = 1005;
 constexpr int32_t kTagDialBase = 2000;
+constexpr int32_t kTagBodyIrBrowse = 3001;
+constexpr int32_t kTagRoomIrBrowse = 3002;
+constexpr int32_t kTagBodyIrNormalize = 3003;
+constexpr int32_t kTagRoomIrNormalize = 3004;
+constexpr int32_t kTagBodyIrEnabled = 3005;
+constexpr int32_t kTagRoomIrEnabled = 3006;
 constexpr Steinberg::int32 kEditorWidth = 540;
 constexpr Steinberg::int32 kEditorHeight = 430;
 // Coordinates are in the backing-plate pixel space (the skin is 540x430).
@@ -76,6 +86,12 @@ std::string graphJsonWithPresetName(const std::string& jsonGraph, const std::str
     } catch (...) {
         return jsonGraph;
     }
+}
+
+std::string displayFileName(const std::string& path) {
+    if (path.empty()) return "No IR selected";
+    const auto name = std::filesystem::path(path).filename().string();
+    return name.empty() ? path : name;
 }
 
 std::filesystem::path getPresetsDir() {
@@ -126,6 +142,25 @@ VSTGUI::CTextButton* makeButton(const VSTGUI::CRect& rect, VSTGUI::IControlListe
         auto font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("Arial", fontSize);
         button->setFont(font.get());
     }
+    return button;
+}
+
+// Small recessed metal controls used by the IR rack.  These are deliberately
+// drawn by the control rather than relying on the skin, so the section keeps
+// its depth and contrast when the backing plate is replaced or scaled.
+VSTGUI::CTextButton* makeIrPlateButton(const VSTGUI::CRect& rect, VSTGUI::IControlListener* listener,
+                                       int32_t tag, const std::string& title) {
+    auto* button = new VSTGUI::CTextButton(rect, listener, tag, title.c_str());
+    button->setRoundRadius(3.0);
+    button->setFrameWidth(1.0);
+    button->setFrameColor(kBorder);
+    button->setFrameColorHighlighted(kAccent);
+    button->setTextColor(kText);
+    button->setTextColorHighlighted(kAccent);
+    button->setGradient(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(58, 62, 57), VSTGUI::CColor(18, 21, 19)));
+    button->setGradientHighlighted(VSTGUI::CGradient::create(0, 1, VSTGUI::CColor(76, 84, 70), VSTGUI::CColor(24, 30, 24)));
+    auto font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("Arial", 7.0);
+    button->setFont(font.get());
     return button;
 }
 
@@ -288,7 +323,7 @@ public:
         setTransparency(true);
     }
 
-    void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
+    void draw(VSTGUI::CDrawContext* context) override {
         const auto view = getViewSize();
         const VSTGUI::CRect size(0, 0, view.getWidth(), view.getHeight());
         auto path = VSTGUI::owned(context->createRoundRectGraphicsPath(size, radius));
@@ -373,10 +408,25 @@ private:
     CLASS_METHODS_NOCOPY(SoftOptionMenu, VSTGUI::COptionMenu)
 };
 
-class ScopeDisplay : public VSTGUI::CViewContainer {
+class ScopeDisplay : public VSTGUI::CView {
 public:
-    explicit ScopeDisplay(const VSTGUI::CRect& rect) : CViewContainer(rect) {
+    ScopeDisplay(const VSTGUI::CRect& rect, std::function<void()> requestWaveform)
+        : CView(rect), requestWaveform(std::move(requestWaveform)) {
         setTransparency(true);
+        animationTimer = VSTGUI::owned(new VSTGUI::CVSTGUITimer([this](VSTGUI::CVSTGUITimer*) {
+            if (this->requestWaveform) {
+                this->requestWaveform();
+            }
+            setDirty(true);
+            invalidRect(getViewSize());
+        }, 33, false));
+    }
+
+    ~ScopeDisplay() override {
+        if (animationTimer) {
+            animationTimer->stop();
+            animationTimer = nullptr;
+        }
     }
 
     void setPatchName(const std::string& next) {
@@ -384,9 +434,16 @@ public:
         invalid();
     }
 
-    void drawBackgroundRect(VSTGUI::CDrawContext* context, const VSTGUI::CRect& updateRect) override {
-        const auto view = getViewSize();
-        const VSTGUI::CRect size(0, 0, view.getWidth(), view.getHeight());
+    void startAnimation() {
+        if (animationTimer) {
+            animationTimer->start();
+        }
+    }
+
+    void draw(VSTGUI::CDrawContext* context) override {
+        const auto size = getViewSize();
+        context->setFillColor(VSTGUI::CColor(9, 15, 10));
+        context->drawRect(size, VSTGUI::kDrawFilled);
         auto screen = size;
         screen.inset(4.0, 10.0);
         context->setFillColor(VSTGUI::CColor(9, 15, 10));
@@ -402,33 +459,49 @@ public:
         context->drawString("CURRENT PATCH", VSTGUI::CRect(screen.left, screen.top + 11, screen.right, screen.top + 27), VSTGUI::kCenterText);
         context->setFont(VSTGUI::kNormalFontSmall);
         context->drawString(patchName.c_str(), VSTGUI::CRect(screen.left, screen.top + 30, screen.right, screen.top + 49), VSTGUI::kCenterText);
-
-        VSTGUI::CPoint last;
-        bool hasLast = false;
-        context->setFrameColor(VSTGUI::CColor(162, 242, 112));
-        context->setLineWidth(1.4);
-        const auto width = screen.getWidth();
-        const auto waveformTop = screen.top + 58.0;
-        const auto waveformBottom = screen.bottom - 8.0;
-        const auto mid = (waveformTop + waveformBottom) * 0.5;
-        const auto amp = (waveformBottom - waveformTop) * 0.42;
-        for (int i = 0; i <= 120; ++i) {
-            const auto t = static_cast<double>(i) / 120.0;
-            const auto x = screen.left + t * width;
-            const auto y = mid + std::sin(t * 10.0 * 3.14159265358979323846) * amp;
-            VSTGUI::CPoint p(x, y);
-            if (hasLast) {
-                context->drawLine(last, p);
-            }
-            last = p;
-            hasLast = true;
-        }
+        setDirty(false);
     }
 
 private:
     std::string patchName = "Default Poly Sine";
+    std::function<void()> requestWaveform;
+    VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> animationTimer;
 
-    CLASS_METHODS_NOCOPY(ScopeDisplay, VSTGUI::CViewContainer)
+    CLASS_METHODS_NOCOPY(ScopeDisplay, VSTGUI::CView)
+};
+
+class WaveformDisplay : public VSTGUI::CView {
+public:
+    explicit WaveformDisplay(const VSTGUI::CRect& rect) : CView(rect) {}
+
+    void setWaveform(const std::vector<float>& next) {
+        waveform = next;
+        invalid();
+    }
+
+    void draw(VSTGUI::CDrawContext* context) override {
+        const auto size = getViewSize();
+        if (waveform.size() < 2) return;
+        const auto mid = (size.top + size.bottom) * 0.5;
+        const auto amplitude = size.getHeight() * 0.42;
+        context->setFrameColor(VSTGUI::CColor(162, 242, 112));
+        context->setLineWidth(1.4);
+        VSTGUI::CPoint previous;
+        for (std::size_t i = 0; i < waveform.size(); ++i) {
+            const auto t = static_cast<double>(i) / static_cast<double>(waveform.size() - 1);
+            const VSTGUI::CPoint point(
+                size.left + t * size.getWidth(),
+                mid - std::clamp(static_cast<double>(waveform[i]), -1.0, 1.0) * amplitude);
+            if (i > 0) context->drawLine(previous, point);
+            previous = point;
+        }
+        setDirty(false);
+    }
+
+private:
+    std::vector<float> waveform = std::vector<float>(128, 0.0f);
+
+    CLASS_METHODS_NOCOPY(WaveformDisplay, VSTGUI::CView)
 };
 
 class DecorativeKnob : public VSTGUI::CView {
@@ -597,12 +670,23 @@ struct OrchVstGuiEditor::Impl {
     VSTGUI::CTextLabel* portLabel = nullptr;
     VSTGUI::CTextLabel* currentPatchLabel = nullptr;
     ScopeDisplay* scopeDisplay = nullptr;
+    WaveformDisplay* waveformDisplay = nullptr;
     VSTGUI::CTextLabel* presetCountLabel = nullptr;
     VSTGUI::COptionMenu* presetMenu = nullptr;
+    VSTGUI::CTextLabel* bodyIrLabel = nullptr;
+    VSTGUI::CTextLabel* roomIrLabel = nullptr;
+    VSTGUI::CTextButton* bodyNormalizeButton = nullptr;
+    VSTGUI::CTextButton* roomNormalizeButton = nullptr;
+    VSTGUI::CTextButton* bodyEnabledButton = nullptr;
+    VSTGUI::CTextButton* roomEnabledButton = nullptr;
     std::vector<std::string> presetNames;
     std::vector<std::filesystem::path> presetPaths;
     std::vector<std::string> dialKeys;
     std::vector<std::tuple<std::string, std::string, float>> pendingLayout;
+    std::string currentGraphJson;
+    bool bodyNormalize = true;
+    bool roomNormalize = true;
+    std::optional<std::pair<bool, std::string>> pendingImpulseResponse;
     json guiLayout;
     VSTGUI::CRect dialPanelBounds;
     VSTGUI::CRect extraDialPanelBounds;
@@ -638,12 +722,19 @@ void PLUGIN_API OrchVstGuiEditor::close() {
         impl->controller->clearActiveView();
     }
     impl->root = nullptr;
+    impl->waveformDisplay = nullptr;
     impl->dialPanel = nullptr;
     impl->extraDialPanel = nullptr;
     impl->portLabel = nullptr;
     impl->currentPatchLabel = nullptr;
     impl->presetCountLabel = nullptr;
     impl->presetMenu = nullptr;
+    impl->bodyIrLabel = nullptr;
+    impl->roomIrLabel = nullptr;
+    impl->bodyNormalizeButton = nullptr;
+    impl->roomNormalizeButton = nullptr;
+    impl->bodyEnabledButton = nullptr;
+    impl->roomEnabledButton = nullptr;
     if (impl->noteOffTimer) {
         impl->noteOffTimer->stop();
         impl->noteOffTimer = nullptr;
@@ -734,8 +825,21 @@ void OrchVstGuiEditor::rebuild() {
     subtitle->setFont(VSTGUI::kNormalFontVerySmall);
     centerPanel->addView(subtitle);
 
-    impl->scopeDisplay = new ScopeDisplay(localRect("elements", "scope", VSTGUI::CRect(169, 50, 371, 186), centerPanelBounds));
+    centerPanel->addView(new BitmapView(
+        localRect("elements", "irPanel", VSTGUI::CRect(155, 300, 385, 402), centerPanelBounds),
+        "orch_ir_panel_fit.png"));
+
+    const auto scopeAbsolute = absoluteRect("elements", "scope", VSTGUI::CRect(169, 50, 371, 186));
+    const auto scopeLocal = localRect("elements", "scope", scopeAbsolute, centerPanelBounds);
+    impl->scopeDisplay = new ScopeDisplay(scopeLocal, [this]() {
+        if (impl->controller) {
+            impl->controller->requestWaveform();
+        }
+    });
     centerPanel->addView(impl->scopeDisplay);
+    impl->waveformDisplay = new WaveformDisplay(localRect("elements", "scopeWaveform", VSTGUI::CRect(177, 130, 364, 167), centerPanelBounds));
+    centerPanel->addView(impl->waveformDisplay);
+    impl->scopeDisplay->startAnimation();
     impl->currentPatchLabel = makeLabel(VSTGUI::CRect(0, 0, 1, 1), "", kAccent);
     impl->currentPatchLabel->setVisible(false);
     centerPanel->addView(impl->currentPatchLabel);
@@ -743,6 +847,26 @@ void OrchVstGuiEditor::rebuild() {
     auto* brand = makeLabel(localRect("elements", "brand", VSTGUI::CRect(155, 370, 385, 390), centerPanelBounds), "ORCH", VSTGUI::CColor(111, 113, 106));
     brand->setFont(VSTGUI::kNormalFontSmall);
     centerPanel->addView(brand);
+
+    auto* irTitle = makeLabel(localRect("elements", "irTitle", VSTGUI::CRect(166, 308, 250, 322), centerPanelBounds), "IR FILES", kMuted);
+    irTitle->setFont(VSTGUI::kNormalFontVerySmall);
+    centerPanel->addView(irTitle);
+    impl->bodyIrLabel = makeLabel(localRect("elements", "bodyIrLabel", VSTGUI::CRect(166, 324, 240, 342), centerPanelBounds), "BODY: No IR selected", kMuted);
+    impl->bodyIrLabel->setFont(VSTGUI::kNormalFontVerySmall);
+    centerPanel->addView(impl->bodyIrLabel);
+    impl->bodyEnabledButton = makeIrPlateButton(localRect("elements", "bodyIrEnabled", VSTGUI::CRect(242, 322, 280, 344), centerPanelBounds), this, kTagBodyIrEnabled, "OFF");
+    centerPanel->addView(impl->bodyEnabledButton);
+    centerPanel->addView(makeIrPlateButton(localRect("elements", "bodyIrBrowse", VSTGUI::CRect(282, 322, 330, 344), centerPanelBounds), this, kTagBodyIrBrowse, "BROWSE"));
+    impl->bodyNormalizeButton = makeIrPlateButton(localRect("elements", "bodyIrNormalize", VSTGUI::CRect(332, 322, 374, 344), centerPanelBounds), this, kTagBodyIrNormalize, "NORM");
+    centerPanel->addView(impl->bodyNormalizeButton);
+    impl->roomIrLabel = makeLabel(localRect("elements", "roomIrLabel", VSTGUI::CRect(166, 356, 240, 374), centerPanelBounds), "ROOM: No IR selected", kMuted);
+    impl->roomIrLabel->setFont(VSTGUI::kNormalFontVerySmall);
+    centerPanel->addView(impl->roomIrLabel);
+    impl->roomEnabledButton = makeIrPlateButton(localRect("elements", "roomIrEnabled", VSTGUI::CRect(242, 354, 280, 376), centerPanelBounds), this, kTagRoomIrEnabled, "OFF");
+    centerPanel->addView(impl->roomEnabledButton);
+    centerPanel->addView(makeIrPlateButton(localRect("elements", "roomIrBrowse", VSTGUI::CRect(282, 354, 330, 376), centerPanelBounds), this, kTagRoomIrBrowse, "BROWSE"));
+    impl->roomNormalizeButton = makeIrPlateButton(localRect("elements", "roomIrNormalize", VSTGUI::CRect(332, 354, 374, 376), centerPanelBounds), this, kTagRoomIrNormalize, "NORM");
+    centerPanel->addView(impl->roomNormalizeButton);
 
     auto* dialRailTitle = makeLabel(localRect("elements", "dialTitle", VSTGUI::CRect(397, 24, 517, 44), rightRailBounds), "GRAPH DIALS", kMuted);
     dialRailTitle->setFont(VSTGUI::kNormalFontVerySmall);
@@ -788,6 +912,7 @@ void OrchVstGuiEditor::requestInitialState() {
     impl->controller->requestPortFromProcessor(this);
     impl->controller->requestCurrentPatchName();
     impl->controller->requestDialLayout();
+    impl->controller->requestGraphState();
 }
 
 void OrchVstGuiEditor::loadPresets() {
@@ -849,6 +974,18 @@ void OrchVstGuiEditor::valueChanged(VSTGUI::CControl* control) {
         if (activated) {
             openWebEditor();
         }
+    } else if (tag == kTagBodyIrBrowse && activated) {
+        chooseImpulseResponse(true);
+    } else if (tag == kTagRoomIrBrowse && activated) {
+        chooseImpulseResponse(false);
+    } else if (tag == kTagBodyIrNormalize && activated) {
+        toggleImpulseNormalize(true);
+    } else if (tag == kTagRoomIrNormalize && activated) {
+        toggleImpulseNormalize(false);
+    } else if (tag == kTagBodyIrEnabled && activated) {
+        toggleImpulseEnabled(true);
+    } else if (tag == kTagRoomIrEnabled && activated) {
+        toggleImpulseEnabled(false);
     } else if (tag >= kTagDialBase) {
         const auto index = static_cast<size_t>(tag - kTagDialBase);
         if (impl->controller && index < impl->dialKeys.size()) {
@@ -883,7 +1020,7 @@ void OrchVstGuiEditor::updateDialLayout(const std::vector<std::tuple<std::string
 
     int visibleIndex = 0;
     for (const auto& [key, label, value] : layout) {
-        if (visibleIndex >= 9) {
+        if (visibleIndex >= 6) {
             break;
         }
         impl->dialKeys.push_back(key);
@@ -912,6 +1049,221 @@ void OrchVstGuiEditor::updateDialLayout(const std::vector<std::tuple<std::string
     }
     impl->dialPanel->invalid();
     impl->extraDialPanel->invalid();
+}
+
+void OrchVstGuiEditor::updateWaveform(const std::vector<float>& samples) {
+    if (impl->waveformDisplay) {
+        impl->waveformDisplay->setWaveform(samples);
+    }
+}
+
+void OrchVstGuiEditor::updateGraphState(const std::string& graphJson) {
+    impl->currentGraphJson = graphJson;
+    std::string bodyPath;
+    std::string roomPath;
+    bool bodyEnabled = false;
+    bool roomEnabled = false;
+    try {
+        const auto graph = json::parse(graphJson);
+        auto outputId = graph.value("output", "");
+        if (outputId.empty() && graph.contains("nodes") && graph["nodes"].is_array()) {
+            for (const auto& candidate : graph["nodes"]) {
+                if (candidate.value("type", "") == "output") {
+                    outputId = candidate.value("id", "");
+                    break;
+                }
+            }
+        }
+        if (graph.contains("nodes") && graph["nodes"].is_array()) {
+            for (const auto& node : graph["nodes"]) {
+                if (node.value("id", "") != outputId) continue;
+                const auto params = node.value("params", json::object());
+                const auto strings = node.value("stringParams", json::object());
+                bodyEnabled = params.value("body_enabled", 0.0) >= 0.5;
+                roomEnabled = params.value("room_enabled", 0.0) >= 0.5;
+                impl->bodyNormalize = params.value("body_normalize", 1.0) >= 0.5;
+                impl->roomNormalize = params.value("room_normalize", 1.0) >= 0.5;
+                bodyPath = strings.value("body_ir_path", "");
+                roomPath = strings.value("room_ir_path", "");
+                break;
+            }
+        }
+    } catch (...) {
+    }
+    const auto formatStatus = [](const char* type, const std::string& path, bool enabled) {
+        if (!enabled || path.empty()) return std::string(type) + ": No IR selected";
+        return std::string(type) + ": " + displayFileName(path) + (std::filesystem::exists(path) ? "" : " (missing)");
+    };
+    if (impl->bodyIrLabel) {
+        impl->bodyIrLabel->setText(formatStatus("BODY", bodyPath, bodyEnabled).c_str());
+        impl->bodyIrLabel->setFontColor(bodyEnabled && !bodyPath.empty() && std::filesystem::exists(bodyPath) ? kAccent : kMuted);
+        impl->bodyIrLabel->invalid();
+    }
+    if (impl->roomIrLabel) {
+        impl->roomIrLabel->setText(formatStatus("ROOM", roomPath, roomEnabled).c_str());
+        impl->roomIrLabel->setFontColor(roomEnabled && !roomPath.empty() && std::filesystem::exists(roomPath) ? kAccent : kMuted);
+        impl->roomIrLabel->invalid();
+    }
+    if (impl->bodyNormalizeButton) impl->bodyNormalizeButton->setTitle(impl->bodyNormalize ? "NORM" : "RAW");
+    if (impl->roomNormalizeButton) impl->roomNormalizeButton->setTitle(impl->roomNormalize ? "NORM" : "RAW");
+    if (impl->bodyEnabledButton) impl->bodyEnabledButton->setTitle(bodyEnabled ? "ON" : "OFF");
+    if (impl->roomEnabledButton) impl->roomEnabledButton->setTitle(roomEnabled ? "ON" : "OFF");
+    if (impl->pendingImpulseResponse) {
+        const auto pending = std::move(*impl->pendingImpulseResponse);
+        impl->pendingImpulseResponse.reset();
+        setImpulseResponse(pending.first, pending.second);
+    }
+}
+
+void OrchVstGuiEditor::chooseImpulseResponse(bool body) {
+#if defined(_WIN32)
+    char path[MAX_PATH] = {};
+    OPENFILENAMEA dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.lpstrFilter = "WAV impulse responses (*.wav)\0*.wav\0All files (*.*)\0*.*\0";
+    dialog.lpstrFile = path;
+    dialog.nMaxFile = sizeof(path);
+    dialog.lpstrTitle = body ? "Select Body Impulse Response" : "Select Room Impulse Response";
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    if (GetOpenFileNameA(&dialog)) {
+        setImpulseResponse(body, path);
+    }
+    return;
+#else
+    auto* selector = VSTGUI::CNewFileSelector::create(frame, VSTGUI::CNewFileSelector::kSelectFile);
+    if (!selector) return;
+    selector->setTitle(body ? "Select Body Impulse Response" : "Select Room Impulse Response");
+    selector->setDefaultExtension(VSTGUI::CFileExtension("WAV impulse response", "wav", "audio/wav"));
+    selector->run([this, body](VSTGUI::CNewFileSelector* result) {
+        if (result && result->getNumSelectedFiles() > 0) {
+            setImpulseResponse(body, result->getSelectedFile(0));
+        }
+    });
+    selector->forget();
+#endif
+}
+
+void OrchVstGuiEditor::setImpulseResponse(bool body, const std::string& path) {
+    auto setStatus = [this, body](const char* status) {
+        auto* label = body ? impl->bodyIrLabel : impl->roomIrLabel;
+        if (label) {
+            label->setText(status);
+            label->setFontColor(kMuted);
+            label->invalid();
+        }
+    };
+    if (impl->currentGraphJson.empty()) {
+        impl->pendingImpulseResponse = std::make_pair(body, path);
+        setStatus(body ? "BODY: Waiting for graph..." : "ROOM: Waiting for graph...");
+        if (impl->controller) impl->controller->requestGraphState();
+        return;
+    }
+    try {
+        auto graph = json::parse(impl->currentGraphJson);
+        auto outputId = graph.value("output", "");
+        if (outputId.empty() && graph.contains("nodes") && graph["nodes"].is_array()) {
+            for (const auto& candidate : graph["nodes"]) {
+                if (candidate.value("type", "") == "output") {
+                    outputId = candidate.value("id", "");
+                    break;
+                }
+            }
+        }
+        bool updated = false;
+        for (auto& node : graph["nodes"]) {
+            if (node.value("id", "") != outputId) continue;
+            auto& params = node["params"];
+            auto& strings = node["stringParams"];
+            params[body ? "body_enabled" : "room_enabled"] = 1.0;
+            strings[body ? "body_ir_path" : "room_ir_path"] = path;
+            if (!params.contains(body ? "body_normalize" : "room_normalize")) {
+                params[body ? "body_normalize" : "room_normalize"] = 1.0;
+            }
+            updated = true;
+            break;
+        }
+        if (!updated) {
+            setStatus(body ? "BODY: Output node not found" : "ROOM: Output node not found");
+            return;
+        }
+        impl->currentGraphJson = graph.dump(2);
+        char buffer[1024 * 32];
+        osc::OutboundPacketStream packet(buffer, sizeof(buffer));
+        packet << osc::BeginMessage("/orch_faust/load_graph") << impl->currentGraphJson.c_str() << osc::EndMessage;
+        UdpTransmitSocket socket(IpEndpointName("127.0.0.1", impl->controller ? impl->controller->getActivePort() : 9020));
+        socket.Send(packet.Data(), packet.Size());
+        packet.Clear();
+        packet << osc::BeginMessage("/orch_faust/compile") << osc::EndMessage;
+        socket.Send(packet.Data(), packet.Size());
+        updateGraphState(impl->currentGraphJson);
+    } catch (const std::exception&) {
+        setStatus(body ? "BODY: Could not apply IR" : "ROOM: Could not apply IR");
+    } catch (...) {
+        setStatus(body ? "BODY: Could not apply IR" : "ROOM: Could not apply IR");
+    }
+}
+
+void OrchVstGuiEditor::toggleImpulseNormalize(bool body) {
+    try {
+        auto graph = json::parse(impl->currentGraphJson);
+        auto outputId = graph.value("output", "");
+        if (outputId.empty() && graph.contains("nodes") && graph["nodes"].is_array()) {
+            for (const auto& candidate : graph["nodes"]) {
+                if (candidate.value("type", "") == "output") {
+                    outputId = candidate.value("id", "");
+                    break;
+                }
+            }
+        }
+        bool updated = false;
+        for (auto& node : graph["nodes"]) {
+            if (node.value("id", "") != outputId) continue;
+            auto& params = node["params"];
+            const auto key = body ? "body_normalize" : "room_normalize";
+            params[key] = params.value(key, 1.0) >= 0.5 ? 0.0 : 1.0;
+            updated = true;
+            break;
+        }
+        if (!updated) return;
+        impl->currentGraphJson = graph.dump(2);
+        updateGraphState(impl->currentGraphJson);
+        char buffer[1024 * 32];
+        osc::OutboundPacketStream packet(buffer, sizeof(buffer));
+        packet << osc::BeginMessage("/orch_faust/load_graph") << impl->currentGraphJson.c_str() << osc::EndMessage;
+        UdpTransmitSocket socket(IpEndpointName("127.0.0.1", impl->controller ? impl->controller->getActivePort() : 9020));
+        socket.Send(packet.Data(), packet.Size());
+    } catch (...) {
+    }
+}
+
+void OrchVstGuiEditor::toggleImpulseEnabled(bool body) {
+    try {
+        auto graph = json::parse(impl->currentGraphJson);
+        auto outputId = graph.value("output", "");
+        if (outputId.empty() && graph.contains("nodes") && graph["nodes"].is_array()) {
+            for (const auto& candidate : graph["nodes"]) {
+                if (candidate.value("type", "") == "output") {
+                    outputId = candidate.value("id", "");
+                    break;
+                }
+            }
+        }
+        for (auto& node : graph["nodes"]) {
+            if (node.value("id", "") != outputId) continue;
+            auto& params = node["params"];
+            const auto key = body ? "body_enabled" : "room_enabled";
+            params[key] = params.value(key, 0.0) >= 0.5 ? 0.0 : 1.0;
+            impl->currentGraphJson = graph.dump(2);
+            updateGraphState(impl->currentGraphJson);
+            char buffer[1024 * 32];
+            osc::OutboundPacketStream packet(buffer, sizeof(buffer));
+            packet << osc::BeginMessage("/orch_faust/load_graph") << impl->currentGraphJson.c_str() << osc::EndMessage;
+            UdpTransmitSocket socket(IpEndpointName("127.0.0.1", impl->controller ? impl->controller->getActivePort() : 9020));
+            socket.Send(packet.Data(), packet.Size());
+            return;
+        }
+    } catch (...) {
+    }
 }
 
 void OrchVstGuiEditor::loadSelectedPreset() {
@@ -944,6 +1296,7 @@ void OrchVstGuiEditor::loadSelectedPreset() {
         return;
     }
     jsonGraph = graphJsonWithPresetName(jsonGraph, impl->presetNames[index]);
+    updateGraphState(jsonGraph);
     if (impl->controller) {
         impl->controller->setCurrentPatchName(impl->presetNames[index]);
     }

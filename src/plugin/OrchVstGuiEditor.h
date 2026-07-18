@@ -26,6 +26,8 @@ public:
     void updatePortLabel(int port) override;
     void updateCurrentPatchLabel(const std::string& name) override;
     void updateDialLayout(const std::vector<std::tuple<std::string, std::string, float>>& layout) override;
+    void updateGraphState(const std::string& graphJson) override;
+    void updateWaveform(const std::vector<float>& samples) override;
 
 private:
     void rebuild();
@@ -34,6 +36,10 @@ private:
     void loadSelectedPreset();
     void playTestNote();
     void openWebEditor();
+    void chooseImpulseResponse(bool body);
+    void setImpulseResponse(bool body, const std::string& path);
+    void toggleImpulseNormalize(bool body);
+    void toggleImpulseEnabled(bool body);
 
     struct Impl;
     Impl* impl = nullptr;

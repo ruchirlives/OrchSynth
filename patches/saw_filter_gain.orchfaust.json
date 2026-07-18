@@ -22,6 +22,11 @@
       "params": {
         "gain": 0.25
       }
+    },
+    {
+      "id": "out1",
+      "type": "output",
+      "params": {}
     }
   ],
   "connections": [
@@ -32,7 +37,11 @@
     {
       "source": "filter1",
       "target": "gain1"
+    },
+    {
+      "source": "gain1",
+      "target": "out1"
     }
   ],
-  "output": "gain1"
+  "output": "out1"
 }

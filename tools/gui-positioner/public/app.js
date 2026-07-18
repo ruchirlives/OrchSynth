@@ -9,21 +9,23 @@ const sizeReadout = document.querySelector('#size-readout');
 const fields = Object.fromEntries(['x', 'y', 'w', 'h'].map(key => [key, document.querySelector(`#field-${key}`)]));
 const fontSizeField = document.querySelector('#field-fontSize');
 const fontSizeLabel = document.querySelector('#font-size-label');
-const state = { layout: null, selected: null, showGroups: false, showNames: false, snap: 2, zoom: 1.25, history: [], future: [], interaction: null };
+const state = { layout: null, selected: [], showGroups: false, showNames: false, snap: 2, zoom: 1.25, history: [], future: [], interaction: null };
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const entries = () => [
   ...Object.entries(state.layout.elements).map(([name, item]) => ({ name, item, group: false })),
   ...(state.showGroups ? Object.entries(state.layout.groups).map(([name, item]) => ({ name, item, group: true })) : [])
-];
+].sort((left, right) => (left.item.z || 0) - (right.item.z || 0));
 
 function absoluteRect(item) {
   return { x: item.x, y: item.y, w: item.w, h: item.h };
 }
 
 function selectedEntry() {
-  return entries().find(entry => entry.name === state.selected) || null;
+  return state.selected.length === 1 ? entries().find(entry => entry.name === state.selected[0]) || null : null;
 }
+
+function isSelected(name) { return state.selected.includes(name); }
 
 function snapshot() {
   state.history.push(clone(state.layout));
@@ -42,8 +44,12 @@ function setStatus(message, error = false) {
   status.style.color = error ? '#f2a05b' : '#a4ed66';
 }
 
-function select(name) {
-  state.selected = name;
+function select(name, additive = false) {
+  if (additive) {
+    state.selected = isSelected(name) ? state.selected.filter(item => item !== name) : [...state.selected, name];
+  } else {
+    state.selected = [name];
+  }
   render();
 }
 
@@ -56,7 +62,7 @@ function updateInspector() {
   fontSizeLabel.hidden = !supportsFontSize;
   if (!entry) {
     selectionName.textContent = 'None';
-    sizeReadout.textContent = 'Select a control to resize it.';
+    sizeReadout.textContent = state.selected.length > 1 ? `${state.selected.length} objects selected.` : 'Select a control to resize it.';
     selectionParent.textContent = 'Select a control or container.';
     return;
   }
@@ -76,7 +82,12 @@ function previewFor(entry) {
   else if (entry.item.type === 'dial') {
     preview.innerHTML = '<img src="/asset/orch_knob_square.png" alt="">';
   } else if (entry.item.type === 'scope') {
-    preview.innerHTML = '<div class="scope-screen"><span class="scope-heading">CURRENT PATCH</span><span class="scope-patch">Default Poly Sine</span><span class="scope-wave"></span></div>';
+    preview.innerHTML = '<div class="scope-screen"><span class="scope-heading">CURRENT PATCH</span><span class="scope-patch">Default Poly Sine</span></div>';
+  } else if (entry.item.type === 'waveform') {
+    preview.innerHTML = '<svg class="animated-waveform" viewBox="0 0 187 37" preserveAspectRatio="none" aria-hidden="true"><path d="M0 18 C5 3 10 3 15 18 S25 33 30 18 S40 3 45 18 S55 33 60 18 S70 3 75 18 S85 33 90 18 S100 3 105 18 S115 33 120 18 S130 3 135 18 S145 33 150 18 S160 3 165 18 S175 33 180 18 S185 3 187 18"/></svg>';
+  } else if (entry.item.type === 'panel') {
+    preview.classList.add('panel-preview');
+    if (entry.item.asset) preview.innerHTML = `<img src="/asset/${entry.item.asset}" alt="">`;
   } else {
     const text = document.createElement('span');
     text.className = `vst-text ${fontClassFor(entry.name)} ${colorClassFor(entry.name)}`;
@@ -111,8 +122,8 @@ function renderList() {
     const button = document.createElement('button');
     button.textContent = entry.item.label || entry.name;
     button.title = entry.name;
-    if (entry.name === state.selected) button.classList.add('selected');
-    button.addEventListener('click', () => select(entry.name));
+    if (isSelected(entry.name)) button.classList.add('selected');
+    button.addEventListener('click', event => select(entry.name, event.shiftKey));
     list.append(button);
   }
 }
@@ -123,17 +134,20 @@ function render() {
   for (const entry of entries()) {
     const rect = absoluteRect(entry.item);
     const node = document.createElement('div');
-    node.className = `bounds${entry.group ? ' group' : ''}${entry.name === state.selected ? ' selected' : ''}`;
-    Object.assign(node.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` });
-    if (state.showNames || entry.name === state.selected) {
+    node.className = `bounds${entry.group ? ' group' : ''}${isSelected(entry.name) ? ' selected' : ''}`;
+    Object.assign(node.style, {
+      left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px`,
+      zIndex: `${entry.item.z || 0}`
+    });
+    if (state.showNames || isSelected(entry.name)) {
       const label = document.createElement('span');
       label.className = 'bounds-label';
       label.textContent = entry.item.label || entry.name;
       node.append(label);
     }
     node.append(previewFor(entry));
-    node.addEventListener('pointerdown', event => beginInteraction(event, entry, 'move'));
-    if (entry.name === state.selected) {
+    node.addEventListener('pointerdown', event => beginInteraction(event, entry, 'move', null, event.shiftKey));
+    if (isSelected(entry.name) && state.selected.length === 1) {
       for (const direction of ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']) {
         const handle = document.createElement('span');
         handle.className = `resize-handle handle-${direction}`;
@@ -149,12 +163,14 @@ function render() {
   updateActions();
 }
 
-function beginInteraction(event, entry, mode, direction = null) {
+function beginInteraction(event, entry, mode, direction = null, additive = false) {
   event.preventDefault();
   event.stopPropagation();
-  if (state.selected !== entry.name) select(entry.name);
+  if (additive) select(entry.name, true);
+  else if (!isSelected(entry.name) || state.selected.length !== 1) select(entry.name);
   snapshot();
-  state.interaction = { mode, direction, entry, start: { x: event.clientX, y: event.clientY }, rect: { x: entry.item.x, y: entry.item.y, w: entry.item.w, h: entry.item.h } };
+  const moving = entries().filter(item => isSelected(item.name));
+  state.interaction = { mode, direction, entry, start: { x: event.clientX, y: event.clientY }, rect: { x: entry.item.x, y: entry.item.y, w: entry.item.w, h: entry.item.h }, moving };
   event.currentTarget.setPointerCapture?.(event.pointerId);
 }
 
@@ -170,8 +186,12 @@ window.addEventListener('pointermove', event => {
   const dy = (event.clientY - active.start.y) / scale;
   const item = active.entry.item;
   if (active.mode === 'move') {
-    item.x = snap(active.rect.x + dx);
-    item.y = snap(active.rect.y + dy);
+    const offsetX = snap(active.rect.x + dx) - active.rect.x;
+    const offsetY = snap(active.rect.y + dy) - active.rect.y;
+    active.moving.forEach(selected => {
+      selected.item.x = snap(selected.item.x + offsetX);
+      selected.item.y = snap(selected.item.y + offsetY);
+    });
   } else {
     resizeFromHandle(item, active.rect, active.direction, dx, dy);
   }
@@ -219,14 +239,15 @@ fontSizeField.addEventListener('change', () => {
 });
 
 window.addEventListener('keydown', event => {
-  const entry = selectedEntry();
-  if (!entry || event.target.matches('input, select')) return;
+  const selected = entries().filter(entry => isSelected(entry.name));
+  if (!selected.length || event.target.matches('input, select')) return;
   const directions = { ArrowLeft: ['x', -1], ArrowRight: ['x', 1], ArrowUp: ['y', -1], ArrowDown: ['y', 1] };
   const direction = directions[event.key];
   if (!direction) return;
   event.preventDefault();
   snapshot();
-  entry.item[direction[0]] += direction[1] * (event.shiftKey ? 10 : 1);
+  const distance = direction[1] * (event.shiftKey ? 10 : 1);
+  selected.forEach(entry => { entry.item[direction[0]] += distance; });
   render();
 });
 
@@ -251,6 +272,16 @@ document.querySelector('#redo').addEventListener('click', () => {
   state.layout = state.future.pop();
   render();
 });
+function adjustLayer(delta) {
+  const selected = entries().filter(entry => isSelected(entry.name));
+  if (!selected.length) return;
+  snapshot();
+  selected.forEach(entry => { entry.item.z = (entry.item.z || 0) + delta; });
+  render();
+  setStatus(`${selected.length} object${selected.length === 1 ? '' : 's'} moved ${delta < 0 ? 'back' : 'forward'}.`);
+}
+document.querySelector('#send-back').addEventListener('click', () => adjustLayer(-1));
+document.querySelector('#bring-front').addEventListener('click', () => adjustLayer(1));
 document.querySelector('#reload').addEventListener('click', load);
 document.querySelector('#save').addEventListener('click', async () => {
   try {

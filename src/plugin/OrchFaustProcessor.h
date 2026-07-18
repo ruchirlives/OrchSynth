@@ -7,6 +7,8 @@
 #include "osc/OscServer.h"
 #include "osc/OscCommandQueue.h"
 #include <map>
+#include <array>
+#include <atomic>
 #include <vector>
 
 // Forward declaration of Faust compiler types
@@ -18,6 +20,7 @@ extern const Steinberg::FUID OrchFaustProcessorUID;
 
 class OrchFaustProcessor : public Steinberg::Vst::AudioEffect {
 public:
+    static constexpr std::size_t kWaveformSampleCount = 128;
     OrchFaustProcessor();
     ~OrchFaustProcessor() override;
 
@@ -43,6 +46,7 @@ private:
     void checkAndApplyOscCommands();
     void notifyPatchNameChanged();
     void notifyDialLayoutChanged();
+    void notifyGraphState();
 
     VoiceManager voiceManager;
     ConvolutionProcessor bodyConvolutionProcessor;
@@ -62,6 +66,7 @@ private:
     double processingSampleRate = 44100.0;
     std::map<std::string, float> currentVstDialValues;
     std::vector<std::pair<std::string, std::string>> currentVstDialLayout;
+    std::array<std::atomic<float>, kWaveformSampleCount> outputWaveform {};
 
     // Compiler helper
     void processLoadGraph(const std::string& jsonStr);

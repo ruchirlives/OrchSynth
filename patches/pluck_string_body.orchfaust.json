@@ -46,6 +46,11 @@
       "params": {
         "gain": 0.5
       }
+    },
+    {
+      "id": "out1",
+      "type": "output",
+      "params": {}
     }
   ],
   "connections": [
@@ -68,7 +73,11 @@
     {
       "source": "body1",
       "target": "gain1"
+    },
+    {
+      "source": "gain1",
+      "target": "out1"
     }
   ],
-  "output": "gain1"
+  "output": "out1"
 }

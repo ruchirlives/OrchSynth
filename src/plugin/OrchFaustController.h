@@ -24,6 +24,8 @@ public:
     void requestPortFromProcessor(OrchEditorView* view);
     void requestCurrentPatchName();
     void requestDialLayout();
+    void requestGraphState();
+    void requestWaveform();
     void setCurrentPatchName(std::string name);
     void setVstDial(const std::string& key, float value);
     void clearActiveView() { activeView = nullptr; }
