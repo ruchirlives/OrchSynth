@@ -81,3 +81,7 @@ cmake --build build --config Release --target OrchSynth --parallel
 ```
 
 The Steinberg validator should report `0 tests failed` for OrchSynth.
+
+## Gumroad Deployments
+
+For standalone installer packaging and Gumroad deployment details, refer to [DEPLOY.md](file:///E:/CODINGPROJECTS/C++/OrchSynth/DEPLOY.md).
