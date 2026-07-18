@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Voice.h"
+#include "PerformanceEvent.h"
 #include <vector>
 #include <mutex>
 #include <string>
@@ -15,10 +16,11 @@ public:
     ~VoiceManager();
 
     void prepare(double sampleRate, int blockSize);
-    void process(float** outputs, int numFrames);
+    void process(float** outputs, int numFrames, int outputOffset = 0, bool clearOutput = true);
     
     void noteOn(int note, float velocity);
     void noteOff(int note);
+    void applyPerformanceEvent(const PerformanceEvent& event);
     void allNotesOff();
     
     void setParameter(const std::string& path, float value);
@@ -28,6 +30,8 @@ public:
     bool updateFactory(llvm_dsp_factory* newFactory);
     bool isCompiled() const { return compiled; }
 
+    std::int32_t allocateNoteId();
+
 private:
     int maxVoices;
     std::vector<std::unique_ptr<Voice>> voices;
@@ -36,6 +40,7 @@ private:
     double sampleRate;
     int blockSize;
     bool compiled;
+    std::int32_t nextGeneratedNoteId = -10000;
 
     // Temporary scratch buffers for voices rendering (stereo)
     std::vector<float> scratchBufferL;

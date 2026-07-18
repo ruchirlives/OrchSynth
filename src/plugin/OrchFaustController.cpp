@@ -1,5 +1,6 @@
 #include "OrchFaustController.h"
 #include "OrchVstGuiEditor.h"
+#include "pluginterfaces/base/ustring.h"
 #include "public.sdk/source/common/pluginview.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "ip/UdpSocket.h"
@@ -866,6 +867,61 @@ void OrchFaustController::requestDialLayout() {
         msg->setMessageID("GetVstDialLayout");
         sendMessage(msg);
     }
+}
+
+Steinberg::int32 PLUGIN_API OrchFaustController::getNoteExpressionCount(
+    Steinberg::int32 busIndex, Steinberg::int16 channel) {
+    return busIndex == 0 && channel >= 0 && channel < 16 ? 3 : 0;
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustController::getNoteExpressionInfo(
+    Steinberg::int32 busIndex, Steinberg::int16 channel, Steinberg::int32 noteExpressionIndex,
+    Steinberg::Vst::NoteExpressionTypeInfo& info) {
+    if (busIndex != 0 || channel < 0 || channel >= 16 || noteExpressionIndex < 0 || noteExpressionIndex >= 3)
+        return Steinberg::kResultFalse;
+
+    using namespace Steinberg;
+    using namespace Steinberg::Vst;
+    info = {};
+    info.unitId = -1;
+    info.associatedParameterId = kNoParamId;
+    info.valueDesc.minimum = 0.0;
+    info.valueDesc.maximum = 1.0;
+    info.valueDesc.stepCount = 0;
+
+    if (noteExpressionIndex == 0) {
+        info.typeId = kTuningTypeID;
+        UString128(STR16("Tuning")).copyTo(info.title, 128);
+        UString128(STR16("Tune")).copyTo(info.shortTitle, 128);
+        UString128(STR16("semitones")).copyTo(info.units, 128);
+        info.valueDesc.defaultValue = 0.5;
+        info.flags = NoteExpressionTypeInfo::kIsBipolar;
+    } else if (noteExpressionIndex == 1) {
+        info.typeId = kBrightnessTypeID;
+        UString128(STR16("Timbre")).copyTo(info.title, 128);
+        UString128(STR16("Timbre")).copyTo(info.shortTitle, 128);
+        info.valueDesc.defaultValue = 0.0;
+        info.flags = 0;
+    } else {
+        info.typeId = kExpressionTypeID;
+        UString128(STR16("Expression")).copyTo(info.title, 128);
+        UString128(STR16("Expr")).copyTo(info.shortTitle, 128);
+        info.valueDesc.defaultValue = 0.0;
+        info.flags = 0;
+    }
+    return Steinberg::kResultTrue;
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustController::getNoteExpressionStringByValue(
+    Steinberg::int32, Steinberg::int16, Steinberg::Vst::NoteExpressionTypeID,
+    Steinberg::Vst::NoteExpressionValue, Steinberg::Vst::String128) {
+    return Steinberg::kResultFalse;
+}
+
+Steinberg::tresult PLUGIN_API OrchFaustController::getNoteExpressionValueByString(
+    Steinberg::int32, Steinberg::int16, Steinberg::Vst::NoteExpressionTypeID,
+    const Steinberg::Vst::TChar*, Steinberg::Vst::NoteExpressionValue&) {
+    return Steinberg::kResultFalse;
 }
 
 void OrchFaustController::requestGraphState() {

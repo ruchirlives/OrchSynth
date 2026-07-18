@@ -80,32 +80,91 @@ bool VoiceManager::updateFactory(llvm_dsp_factory* newFactory) {
 }
 
 void VoiceManager::noteOn(int note, float velocity) {
+    PerformanceEvent event;
+    event.type = PerformanceEventType::NoteOn;
+    event.noteId = allocateNoteId();
+    event.pitch = static_cast<std::int16_t>(note);
+    event.velocity = velocity;
+    applyPerformanceEvent(event);
+}
+
+std::int32_t VoiceManager::allocateNoteId() {
+    const auto result = nextGeneratedNoteId;
+    ++nextGeneratedNoteId;
+    if (nextGeneratedNoteId > -1000) nextGeneratedNoteId = -10000;
+    return result;
+}
+
+void VoiceManager::applyPerformanceEvent(const PerformanceEvent& event) {
     std::lock_guard<std::mutex> lock(voiceMutex);
     if (!compiled) return;
 
-    // Find if note is already playing (re-trigger)
-    for (auto& voice : voices) {
-        if (voice->isActive() && voice->getNote() == note) {
-            voice->noteOn(note, velocity);
-            return;
+    auto matchingVoice = [&]() -> Voice* {
+        if (event.noteId != -1) {
+            for (auto& voice : voices) {
+                if (voice->isActive() && voice->getNoteId() == event.noteId) return voice.get();
+            }
         }
-    }
+        for (auto& voice : voices) {
+            if (voice->isActive() && voice->getBus() == event.eventBus &&
+                voice->getChannel() == event.channel && voice->getNote() == event.pitch) return voice.get();
+        }
+        return nullptr;
+    };
 
-    // Find free voice
-    for (auto& voice : voices) {
-        if (!voice->isActive()) {
-            voice->noteOn(note, velocity);
-            return;
+    switch (event.type) {
+        case PerformanceEventType::NoteOn: {
+            Voice* target = nullptr;
+            if (event.noteId != -1) target = matchingVoice();
+            if (!target) {
+                for (auto& voice : voices) {
+                    if (!voice->isActive()) { target = voice.get(); break; }
+                }
+            }
+            if (!target && !voices.empty()) {
+                target = voices.front().get();
+                target->noteOff();
+            }
+            if (target) target->noteOn(event.noteId, event.eventBus, event.channel, event.pitch,
+                                       event.velocity, event.tuningSemitones);
+            break;
         }
-    }
-
-    // Voice stealing: steal first active voice
-    for (auto& voice : voices) {
-        if (voice->isActive()) {
-            voice->noteOff();
-            voice->noteOn(note, velocity);
-            return;
-        }
+        case PerformanceEventType::NoteOff:
+            if (auto* voice = matchingVoice()) voice->noteOff(event.velocity);
+            break;
+        case PerformanceEventType::NotePressure:
+            if (auto* voice = matchingVoice()) voice->setNotePressure(event.value);
+            break;
+        case PerformanceEventType::NotePitch:
+            if (auto* voice = matchingVoice()) voice->setNotePitch(event.value);
+            break;
+        case PerformanceEventType::NoteTimbre:
+            if (auto* voice = matchingVoice()) voice->setNoteTimbre(event.value);
+            break;
+        case PerformanceEventType::NoteExpression:
+            if (auto* voice = matchingVoice()) voice->setNoteExpression(event.value);
+            break;
+        case PerformanceEventType::ChannelPressure:
+            for (auto& voice : voices) {
+                if (voice->isActive() && voice->getBus() == event.eventBus && voice->getChannel() == event.channel)
+                    voice->setChannelPressure(event.value);
+            }
+            break;
+        case PerformanceEventType::ChannelPitchBend:
+            for (auto& voice : voices) {
+                if (voice->isActive() && voice->getBus() == event.eventBus && voice->getChannel() == event.channel)
+                    voice->setChannelPitchBend(event.value);
+            }
+            break;
+        case PerformanceEventType::ChannelController:
+            for (auto& voice : voices) {
+                if (voice->isActive() && voice->getBus() == event.eventBus && voice->getChannel() == event.channel)
+                    voice->setParameter("cc_" + std::to_string(event.controllerId), static_cast<float>(event.value));
+            }
+            break;
+        case PerformanceEventType::AllNotesOff:
+            for (auto& voice : voices) if (voice->isActive()) voice->noteOff();
+            break;
     }
 }
 
@@ -147,17 +206,20 @@ void VoiceManager::setGlobalControl(const std::string& name, float value) {
 
 float VoiceManager::getParameter(const std::string& path) {
     std::lock_guard<std::mutex> lock(voiceMutex);
+    for (auto& voice : voices) {
+        if (voice->isActive()) return voice->getParameter(path);
+    }
     if (!voices.empty()) {
         return voices[0]->getParameter(path);
     }
     return 0.0f;
 }
 
-void VoiceManager::process(float** outputs, int numFrames) {
+void VoiceManager::process(float** outputs, int numFrames, int outputOffset, bool clearOutput) {
     // Clear outputs
     for (int i = 0; i < 2; ++i) {
-        if (outputs[i]) {
-            memset(outputs[i], 0, numFrames * sizeof(float));
+        if (clearOutput && outputs[i]) {
+            memset(outputs[i] + outputOffset, 0, numFrames * sizeof(float));
         }
     }
 
@@ -174,7 +236,11 @@ void VoiceManager::process(float** outputs, int numFrames) {
 
     for (auto& voice : voices) {
         if (voice->isActive()) {
-            voice->process(outputs, numFrames, scratchPointers);
+            float* rangedOutputs[2] = {
+                outputs[0] ? outputs[0] + outputOffset : nullptr,
+                outputs[1] ? outputs[1] + outputOffset : nullptr
+            };
+            voice->process(rangedOutputs, numFrames, scratchPointers);
         }
     }
 }

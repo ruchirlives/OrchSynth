@@ -14,7 +14,8 @@ enum class CommandType {
     NoteOff,
     AllNotesOff,
     Status,
-    RequestGraph
+    RequestGraph,
+    RequestDebugValue
 };
 
 struct OscCommand {

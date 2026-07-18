@@ -216,18 +216,43 @@ Steinberg::tresult PLUGIN_API OrchFaustProcessor::process(Steinberg::Vst::Proces
         applyCurrentControls();
     }
 
-    // 3. Process incoming VST3 MIDI events
+    // 3. Translate VST3 events without reducing their precision or note scope.
+    std::vector<PerformanceEvent> performanceEvents;
     if (data.inputEvents) {
-        handleMidiEvents(data.inputEvents);
+        performanceEvents.reserve(static_cast<std::size_t>(data.inputEvents->getEventCount()));
+        collectMidiEvents(data.inputEvents, data.numSamples, performanceEvents);
+        std::stable_sort(performanceEvents.begin(), performanceEvents.end(),
+            [](const PerformanceEvent& lhs, const PerformanceEvent& rhs) {
+                return lhs.sampleOffset < rhs.sampleOffset;
+            });
     }
 
-    // 4. Render Audio
+    // 4. Render audio in event-delimited ranges for sample-accurate performance data.
     if (data.numOutputs > 0 && data.outputs[0].numChannels >= 2) {
         float* outputs[2] = {
             data.outputs[0].channelBuffers32[0],
             data.outputs[0].channelBuffers32[1]
         };
-        voiceManager.process(outputs, data.numSamples);
+        if (outputs[0]) std::fill_n(outputs[0], data.numSamples, 0.0f);
+        if (outputs[1]) std::fill_n(outputs[1], data.numSamples, 0.0f);
+
+        Steinberg::int32 renderOffset = 0;
+        std::size_t eventIndex = 0;
+        while (eventIndex < performanceEvents.size()) {
+            const auto eventOffset = performanceEvents[eventIndex].sampleOffset;
+            if (eventOffset > renderOffset) {
+                voiceManager.process(outputs, eventOffset - renderOffset, renderOffset, false);
+                renderOffset = eventOffset;
+            }
+            while (eventIndex < performanceEvents.size() &&
+                   performanceEvents[eventIndex].sampleOffset == eventOffset) {
+                applyPerformanceEvent(performanceEvents[eventIndex]);
+                ++eventIndex;
+            }
+        }
+        if (renderOffset < data.numSamples) {
+            voiceManager.process(outputs, data.numSamples - renderOffset, renderOffset, false);
+        }
         bodyConvolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
         convolutionProcessor.process(outputs[0], outputs[1], data.numSamples);
 
@@ -275,6 +300,10 @@ void OrchFaustProcessor::checkAndApplyOscCommands() {
                 break;
             case CommandType::RequestGraph:
                 if (oscServer) oscServer->sendGraphState(currentGraphJson);
+                break;
+            case CommandType::RequestDebugValue:
+                if (oscServer) oscServer->sendDebugValue(cmd.stringArg1,
+                    voiceManager.getParameter("debug_" + cmd.stringArg1));
                 break;
         }
     }
@@ -437,43 +466,118 @@ void OrchFaustProcessor::processCompile() {
     }
 }
 
-void OrchFaustProcessor::handleMidiEvents(Steinberg::Vst::IEventList* eventList) {
+void OrchFaustProcessor::collectMidiEvents(Steinberg::Vst::IEventList* eventList,
+                                           Steinberg::int32 numSamples,
+                                           std::vector<PerformanceEvent>& events) {
     int count = eventList->getEventCount();
     for (int i = 0; i < count; ++i) {
         Steinberg::Vst::Event e;
         if (eventList->getEvent(i, e) == Steinberg::kResultOk) {
+            PerformanceEvent event;
+            event.sampleOffset = std::clamp(e.sampleOffset, 0, numSamples);
+            event.eventBus = static_cast<std::int16_t>(e.busIndex);
             switch (e.type) {
-                case Steinberg::Vst::Event::kNoteOnEvent:
-                voiceManager.noteOn(static_cast<int>(e.noteOn.pitch), e.noteOn.velocity);
-                    applyCurrentControls();
+                case Steinberg::Vst::Event::kNoteOnEvent: {
+                    event.type = PerformanceEventType::NoteOn;
+                    event.noteId = e.noteOn.noteId == -1 ? voiceManager.allocateNoteId() : e.noteOn.noteId;
+                    event.channel = e.noteOn.channel;
+                    event.pitch = e.noteOn.pitch;
+                    event.velocity = std::clamp(static_cast<double>(e.noteOn.velocity), 0.0, 1.0);
+                    event.tuningSemitones = static_cast<double>(e.noteOn.tuning) / 100.0;
+                    events.push_back(event);
                     break;
+                }
                 case Steinberg::Vst::Event::kNoteOffEvent:
-                    voiceManager.noteOff(static_cast<int>(e.noteOff.pitch));
+                    event.type = PerformanceEventType::NoteOff;
+                    event.noteId = e.noteOff.noteId;
+                    event.channel = e.noteOff.channel;
+                    event.pitch = e.noteOff.pitch;
+                    event.velocity = std::clamp(static_cast<double>(e.noteOff.velocity), 0.0, 1.0);
+                    events.push_back(event);
                     break;
                 case Steinberg::Vst::Event::kPolyPressureEvent:
-                    currentAftertouch = std::clamp(e.polyPressure.pressure, 0.0f, 1.0f);
-                    voiceManager.setGlobalControl("aftertouch", currentAftertouch);
+                    event.type = PerformanceEventType::NotePressure;
+                    event.noteId = e.polyPressure.noteId;
+                    event.channel = e.polyPressure.channel;
+                    event.pitch = e.polyPressure.pitch;
+                    event.value = std::clamp(static_cast<double>(e.polyPressure.pressure), 0.0, 1.0);
+                    events.push_back(event);
+                    break;
+                case Steinberg::Vst::Event::kNoteExpressionValueEvent:
+                    event.noteId = e.noteExpressionValue.noteId;
+                    event.value = std::clamp(e.noteExpressionValue.value, 0.0, 1.0);
+                    if (e.noteExpressionValue.typeId == Steinberg::Vst::kTuningTypeID) {
+                        event.type = PerformanceEventType::NotePitch;
+                        event.value = 240.0 * (event.value - 0.5);
+                    } else if (e.noteExpressionValue.typeId == Steinberg::Vst::kBrightnessTypeID) {
+                        event.type = PerformanceEventType::NoteTimbre;
+                    } else if (e.noteExpressionValue.typeId == Steinberg::Vst::kExpressionTypeID ||
+                               e.noteExpressionValue.typeId == Steinberg::Vst::kVolumeTypeID) {
+                        event.type = PerformanceEventType::NoteExpression;
+                    } else {
+                        break;
+                    }
+                    events.push_back(event);
                     break;
                 case Steinberg::Vst::Event::kLegacyMIDICCOutEvent: {
                     const int controlNumber = static_cast<int>(e.midiCCOut.controlNumber);
+                    event.channel = e.midiCCOut.channel;
                     if (controlNumber == Steinberg::Vst::kAfterTouch) {
-                        currentAftertouch = std::clamp(static_cast<float>(e.midiCCOut.value) / 127.0f, 0.0f, 1.0f);
-                        voiceManager.setGlobalControl("aftertouch", currentAftertouch);
+                        event.type = PerformanceEventType::ChannelPressure;
+                        event.value = std::clamp(static_cast<double>(e.midiCCOut.value) / 127.0, 0.0, 1.0);
                     } else if (controlNumber == Steinberg::Vst::kPitchBend) {
                         const int lsb = static_cast<int>(e.midiCCOut.value) & 0x7f;
                         const int msb = static_cast<int>(e.midiCCOut.value2) & 0x7f;
                         const int raw = (msb << 7) | lsb;
-                        currentPitchBend = std::clamp((static_cast<float>(raw) - 8192.0f) / 8192.0f, -1.0f, 1.0f);
-                        voiceManager.setGlobalControl("pitch_bend", currentPitchBend);
+                        event.type = PerformanceEventType::ChannelPitchBend;
+                        event.value = std::clamp((static_cast<double>(raw) - 8192.0) / 8192.0, -1.0, 1.0);
                     } else if (controlNumber >= 0 && controlNumber < 128) {
-                        currentCcValues[controlNumber] = std::clamp(static_cast<float>(e.midiCCOut.value) / 127.0f, 0.0f, 1.0f);
-                        voiceManager.setGlobalControl("cc_" + std::to_string(controlNumber), currentCcValues[controlNumber]);
+                        event.type = PerformanceEventType::ChannelController;
+                        event.controllerId = static_cast<std::uint32_t>(controlNumber);
+                        event.value = std::clamp(static_cast<double>(e.midiCCOut.value) / 127.0, 0.0, 1.0);
+                    } else {
+                        break;
                     }
+                    events.push_back(event);
                     break;
                 }
             }
         }
     }
+}
+
+void OrchFaustProcessor::applyPerformanceEvent(const PerformanceEvent& event) {
+    if (event.type == PerformanceEventType::NoteOn) {
+        // New voices inherit channel-wide controls; per-note events can then override them.
+        voiceManager.applyPerformanceEvent(event);
+        PerformanceEvent inherited;
+        inherited.eventBus = event.eventBus;
+        inherited.channel = event.channel;
+        inherited.type = PerformanceEventType::ChannelPressure;
+        inherited.value = currentAftertouch;
+        voiceManager.applyPerformanceEvent(inherited);
+        inherited.type = PerformanceEventType::ChannelPitchBend;
+        inherited.value = currentPitchBend;
+        voiceManager.applyPerformanceEvent(inherited);
+        for (std::uint32_t cc = 0; cc < 128; ++cc) {
+            inherited.type = PerformanceEventType::ChannelController;
+            inherited.controllerId = cc;
+            inherited.value = currentCcValues[cc];
+            voiceManager.applyPerformanceEvent(inherited);
+        }
+        for (const auto& [key, value] : currentVstDialValues) {
+            voiceManager.setGlobalControl("vst_dial_" + key, value);
+        }
+        return;
+    }
+    if (event.type == PerformanceEventType::ChannelPressure) {
+        currentAftertouch = static_cast<float>(event.value);
+    } else if (event.type == PerformanceEventType::ChannelPitchBend) {
+        currentPitchBend = static_cast<float>(event.value);
+    } else if (event.type == PerformanceEventType::ChannelController && event.controllerId < 128) {
+        currentCcValues[event.controllerId] = static_cast<float>(event.value);
+    }
+    voiceManager.applyPerformanceEvent(event);
 }
 
 void OrchFaustProcessor::applyCurrentControls() {

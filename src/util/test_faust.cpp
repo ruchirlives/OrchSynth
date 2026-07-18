@@ -157,6 +157,11 @@ int main() {
                 }
             },
             {
+                "id": "debug1",
+                "type": "debug",
+                "params": {}
+            },
+            {
                 "id": "sym1",
                 "type": "sympathetic_strings",
                 "params": {
@@ -196,6 +201,10 @@ int main() {
         "connections": [
             {
                 "source": "osc1",
+                "target": "debug1"
+            },
+            {
+                "source": "debug1",
                 "target": "gain1"
             },
             {

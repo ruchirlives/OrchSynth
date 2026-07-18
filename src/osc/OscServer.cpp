@@ -150,6 +150,10 @@ void OscServer::sendGraphState(const std::string& graphJson) {
     }
 }
 
+void OscServer::sendDebugValue(const std::string& nodeId, float value) {
+    sendEvent("debug_value", nodeId, "", value, 0.0f);
+}
+
 void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointName& remoteEndpoint) {
     std::string address = m.AddressPattern();
     
@@ -237,6 +241,12 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
         }
         else if (address == "/orch_faust/request_graph") {
             commandQueue.push(OscCommand{CommandType::RequestGraph, "", "", 0.0f, 0.0f});
+        }
+        else if (address == "/orch_faust/request_debug_value") {
+            auto arg = m.ArgumentsBegin();
+            if (arg != m.ArgumentsEnd() && arg->IsString()) {
+                commandQueue.push(OscCommand{CommandType::RequestDebugValue, arg->AsString(), "", 0.0f, 0.0f});
+            }
         }
         else if (address == "/orch_faust/ping") {
             Logger::logInfo("OSC: Received ping from ", remoteEndpoint.address, ":", remoteEndpoint.port);

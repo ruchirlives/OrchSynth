@@ -62,6 +62,7 @@ set(SOURCE_FILES
     src/plugin/OrchVstGuiEditor.h
     src/plugin/OrchVstGuiEditor.cpp
     src/plugin/OrchFaustEntry.cpp
+    src/dsp/PerformanceEvent.h
     src/dsp/FaustEngine.h
     src/dsp/FaustEngine.cpp
     src/dsp/ConvolutionProcessor.h

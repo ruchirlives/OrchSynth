@@ -23,13 +23,23 @@
             "enum": [
               "sine", "saw", "square", "noise", "gain", "lowpass", "highpass", "delay",
               "adsr", "lfo", "mixer", "reverb", "karplus_string", "modal_resonator", "body_resonator",
-              "velocity"
+              "velocity", "release_velocity", "aftertouch", "note_pressure", "channel_pressure",
+              "pitch_bend", "note_pitch", "channel_pitch_bend", "timbre", "expression",
+              "note_number", "note_frequency", "gate", "cc", "vst_dial", "debug", "output",
+              "convolution", "body_convolution", "group", "bowed_string", "clarinet", "brass",
+              "flute", "guitar", "nylon_guitar", "electric_guitar", "marimba", "djembe"
             ]
           },
           "params": {
             "type": "OBJECT",
             "additionalProperties": {
               "type": "NUMBER"
+            }
+          },
+          "stringParams": {
+            "type": "OBJECT",
+            "additionalProperties": {
+              "type": "STRING"
             }
           }
         },

@@ -66,8 +66,8 @@ ParamRange getParamRange(const std::string& nodeType, const std::string& paramNa
         paramName == "feedback" || paramName == "wet" || paramName == "normalize") return {0.0f, 1.0f, 0.01f};
     if (paramName == "strike_position") return {0.0f, 6.0f, 0.01f};
     if (paramName == "strike_cutoff") return {20.0f, 20000.0f, 1.0f};
-    if (paramName == "velocity" || paramName == "scale" || paramName == "pitch_bend") return {-1.0f, 1.0f, 0.01f};
-    if (paramName == "aftertouch") return {0.0f, 1.0f, 0.01f};
+    if (paramName == "velocity" || paramName == "scale" || paramName == "pitch_bend") return {-1.0f, 1.0f, 0.000001f};
+    if (paramName == "aftertouch") return {0.0f, 1.0f, 0.000001f};
     if (paramName == "cc") return {0.0f, 127.0f, 1.0f};
     if (paramName == "range") return {0.0f, 24.0f, 0.1f};
     if (paramName == "flute_tune_cents") return {-100.0f, 100.0f, 1.0f};
@@ -272,10 +272,20 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
     ss << "voice_freq = hslider(\"freq\", 440, 20, 20000, 0.01);\n";
     ss << "voice_gain = hslider(\"gain\", 1.0, 0, 1, 0.01);\n";
     ss << "voice_gate = hslider(\"gate\", 0, 0, 1, 1);\n";
-    ss << "aftertouch = hslider(\"aftertouch\", 0, 0, 1, 0.01);\n";
-    ss << "pitch_bend = hslider(\"pitch_bend\", 0, -1, 1, 0.01);\n";
+    ss << "velocity = hslider(\"velocity\", 1, 0, 1, 0.000001);\n";
+    ss << "release_velocity = hslider(\"release_velocity\", 0, 0, 1, 0.000001);\n";
+    ss << "note_number = hslider(\"note_number\", 69, 0, 127, 0.000001);\n";
+    ss << "note_frequency = hslider(\"note_frequency\", 440, 0, 24000, 0.000001);\n";
+    ss << "note_pressure = hslider(\"note_pressure\", 0, 0, 1, 0.000001);\n";
+    ss << "channel_pressure = hslider(\"channel_pressure\", 0, 0, 1, 0.000001);\n";
+    ss << "note_pitch = hslider(\"note_pitch\", 0, -120, 120, 0.000001);\n";
+    ss << "channel_pitch_bend = hslider(\"channel_pitch_bend\", 0, -1, 1, 0.000001);\n";
+    ss << "note_timbre = hslider(\"note_timbre\", 0, 0, 1, 0.000001);\n";
+    ss << "note_expression = hslider(\"note_expression\", 0, 0, 1, 0.000001);\n";
+    ss << "aftertouch = hslider(\"aftertouch\", 0, 0, 1, 0.000001);\n";
+    ss << "pitch_bend = hslider(\"pitch_bend\", 0, -1, 1, 0.000001);\n";
     for (int cc = 0; cc < 128; ++cc) {
-        ss << "cc_" << cc << " = hslider(\"cc_" << cc << "\", 0, 0, 1, 0.01);\n";
+        ss << "cc_" << cc << " = hslider(\"cc_" << cc << "\", 0, 0, 1, 0.000001);\n";
     }
     for (const auto& node : workingGraph.nodes) {
         if (node.type == "vst_dial") {
@@ -433,7 +443,10 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
             }
             
             if (!inputsExpr.empty()) {
-                freqExpr = "max(20.0, " + freqExpr + " + (" + inputsExpr + "))";
+                // The oscillator's signal input carries an absolute frequency in Hz.
+                // It replaces the dial/key-tracked base frequency; connections to the
+                // purple freq parameter handle remain semitone modulation above.
+                freqExpr = "min(20000.0, max(20.0, (" + inputsExpr + ")))";
             }
             
             if (node.type == "sine") {
@@ -449,6 +462,43 @@ std::string FaustGraphCompiler::compile(const Graph& graph, std::string& errorMs
         }
         else if (node.type == "velocity") {
             ss << "voice_gain * " << getParamExpr("velocity", "1.0");
+        }
+        else if (node.type == "release_velocity") {
+            ss << "release_velocity * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "note_pressure") {
+            ss << "note_pressure * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "channel_pressure") {
+            ss << "channel_pressure * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "note_pitch") {
+            ss << "note_pitch * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "channel_pitch_bend") {
+            ss << "channel_pitch_bend * " << getParamExpr("range", "2.0");
+        }
+        else if (node.type == "timbre") {
+            ss << "note_timbre * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "expression") {
+            ss << "note_expression * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "note_number") {
+            // Modulation sources use unit-range values. Keep the raw MIDI key
+            // internally for voice identity/frequency, but expose 0..1 here.
+            ss << "(note_number / 127.0) * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "note_frequency") {
+            ss << "note_frequency * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "gate") {
+            ss << "voice_gate * " << getParamExpr("scale", "1.0");
+        }
+        else if (node.type == "debug") {
+            const std::string signal = inputsExpr.empty() ? "0.0" : inputsExpr;
+            ss << "attach(" << signal << ", (" << signal << ") : hbargraph(\"debug_"
+               << nodeId << "\", -1000000.0, 1000000.0))";
         }
         else if (node.type == "aftertouch") {
             ss << "aftertouch * " << getParamExpr("scale", "1.0");

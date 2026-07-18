@@ -3,6 +3,7 @@
 #include "public.sdk/source/vst/vstaudioeffect.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "dsp/VoiceManager.h"
+#include "dsp/PerformanceEvent.h"
 #include "dsp/ConvolutionProcessor.h"
 #include "osc/OscServer.h"
 #include "osc/OscCommandQueue.h"
@@ -41,7 +42,10 @@ public:
     // (addRef, release, queryInterface are inherited from AudioEffect/FObject)
 
 private:
-    void handleMidiEvents(Steinberg::Vst::IEventList* eventList);
+    void collectMidiEvents(Steinberg::Vst::IEventList* eventList,
+                           Steinberg::int32 numSamples,
+                           std::vector<PerformanceEvent>& events);
+    void applyPerformanceEvent(const PerformanceEvent& event);
     void applyCurrentControls();
     void checkAndApplyOscCommands();
     void notifyPatchNameChanged();

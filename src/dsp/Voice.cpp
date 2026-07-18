@@ -4,7 +4,11 @@
 
 namespace OrchFaust {
 
-Voice::Voice() : dsp(nullptr), midiNote(-1), active(false), gateActive(false), silentFramesCount(0), sampleRate(44100.0) {}
+Voice::Voice()
+    : dsp(nullptr), midiNote(-1), noteId(-1), eventBus(0), midiChannel(0),
+      initialTuningSemitones(0.0), notePitchSemitones(0.0), channelPitchSemitones(0.0),
+      hasNotePressure(false), active(false), gateActive(false), silentFramesCount(0),
+      sampleRate(44100.0) {}
 
 Voice::~Voice() {
     clear();
@@ -17,6 +21,11 @@ void Voice::clear() {
     }
     mapUI.reset();
     midiNote = -1;
+    noteId = -1;
+    initialTuningSemitones = 0.0;
+    notePitchSemitones = 0.0;
+    channelPitchSemitones = 0.0;
+    hasNotePressure = false;
     active = false;
     gateActive = false;
     silentFramesCount = 0;
@@ -69,25 +78,81 @@ bool Voice::setVoiceParam(const std::string& name, float value) {
     return false;
 }
 
-void Voice::noteOn(int note, float velocity) {
+void Voice::noteOn(std::int32_t newNoteId, int bus, int channel, int note,
+                   double velocity, double tuningSemitones) {
+    noteId = newNoteId;
+    eventBus = bus;
+    midiChannel = channel;
     midiNote = note;
+    initialTuningSemitones = tuningSemitones;
+    notePitchSemitones = 0.0;
+    hasNotePressure = false;
     active = true;
     gateActive = true;
     silentFramesCount = 0;
     
     if (mapUI) {
-        float frequency = 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
-        setVoiceParam("freq", frequency);
-        setVoiceParam("gain", velocity);
+        updateFrequency();
+        setVoiceParam("gain", static_cast<float>(velocity));
+        setVoiceParam("velocity", static_cast<float>(velocity));
+        setVoiceParam("release_velocity", 0.0f);
+        setVoiceParam("note_number", static_cast<float>(note));
+        setVoiceParam("note_pressure", 0.0f);
+        setVoiceParam("note_pitch", 0.0f);
+        setVoiceParam("note_timbre", 0.0f);
+        setVoiceParam("note_expression", 0.0f);
         setVoiceParam("gate", 1.0f);
     }
 }
 
-void Voice::noteOff() {
+void Voice::noteOff(double releaseVelocity) {
     if (mapUI) {
+        setVoiceParam("release_velocity", static_cast<float>(releaseVelocity));
         setVoiceParam("gate", 0.0f);
     }
     gateActive = false;
+}
+
+void Voice::updateFrequency() {
+    if (midiNote < 0) return;
+    const double semitones = static_cast<double>(midiNote - 69) + initialTuningSemitones +
+        notePitchSemitones + channelPitchSemitones;
+    const float frequency = static_cast<float>(440.0 * std::exp2(semitones / 12.0));
+    setVoiceParam("freq", frequency);
+    setVoiceParam("note_frequency", frequency);
+}
+
+void Voice::setNotePressure(double value) {
+    hasNotePressure = true;
+    const float v = static_cast<float>(value);
+    setVoiceParam("note_pressure", v);
+    setVoiceParam("aftertouch", v);
+}
+
+void Voice::setNotePitch(double semitones) {
+    notePitchSemitones = semitones;
+    setVoiceParam("note_pitch", static_cast<float>(semitones));
+    updateFrequency();
+}
+
+void Voice::setNoteTimbre(double value) {
+    setVoiceParam("note_timbre", static_cast<float>(value));
+}
+
+void Voice::setNoteExpression(double value) {
+    setVoiceParam("note_expression", static_cast<float>(value));
+}
+
+void Voice::setChannelPressure(double value) {
+    setVoiceParam("channel_pressure", static_cast<float>(value));
+    if (!hasNotePressure) setVoiceParam("aftertouch", static_cast<float>(value));
+}
+
+void Voice::setChannelPitchBend(double normalizedValue, double rangeSemitones) {
+    channelPitchSemitones = normalizedValue * rangeSemitones;
+    setVoiceParam("channel_pitch_bend", static_cast<float>(normalizedValue));
+    setVoiceParam("pitch_bend", static_cast<float>(normalizedValue));
+    updateFrequency();
 }
 
 void Voice::setParameter(const std::string& path, float value) {
