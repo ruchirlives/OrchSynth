@@ -3,6 +3,7 @@
 #include "osc/OscOutboundPacketStream.h"
 #include <iostream>
 #include <cstring>
+#include <vector>
 
 namespace OrchFaust {
 
@@ -126,6 +127,29 @@ void OscServer::sendEvent(const std::string& type,
     }
 }
 
+void OscServer::sendGraphState(const std::string& graphJson) {
+    std::string host;
+    int targetPort = 0;
+    {
+        std::lock_guard<std::mutex> lock(replyMutex);
+        host = replyHost;
+        targetPort = replyPort;
+    }
+    if (targetPort <= 0) return;
+
+    try {
+        UdpTransmitSocket transmitSocket(IpEndpointName(host.c_str(), targetPort));
+        std::vector<char> buffer(graphJson.size() + 512);
+        osc::OutboundPacketStream packet(buffer.data(), static_cast<int>(buffer.size()));
+        packet << osc::BeginMessage("/orch_faust/event")
+               << portNum << "graph_state" << graphJson.c_str() << "" << 0.0f << 0.0f
+               << osc::EndMessage;
+        transmitSocket.Send(packet.Data(), packet.Size());
+    } catch (const std::exception& e) {
+        Logger::logError("OSC: Failed to send graph state: ", e.what());
+    }
+}
+
 void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointName& remoteEndpoint) {
     std::string address = m.AddressPattern();
     
@@ -210,6 +234,9 @@ void OscServer::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointNa
         else if (address == "/orch_faust/status") {
             OscCommand cmd{CommandType::Status, "", "", 0.0f, 0.0f};
             commandQueue.push(cmd);
+        }
+        else if (address == "/orch_faust/request_graph") {
+            commandQueue.push(OscCommand{CommandType::RequestGraph, "", "", 0.0f, 0.0f});
         }
         else if (address == "/orch_faust/ping") {
             Logger::logInfo("OSC: Received ping from ", remoteEndpoint.address, ":", remoteEndpoint.port);

@@ -13,7 +13,8 @@ enum class CommandType {
     NoteOn,
     NoteOff,
     AllNotesOff,
-    Status
+    Status,
+    RequestGraph
 };
 
 struct OscCommand {

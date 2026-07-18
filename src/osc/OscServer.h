@@ -20,6 +20,7 @@ public:
     void stop();
     bool isRunning() const { return running.load(); }
     int getPortNum() const { return portNum; }
+    void sendGraphState(const std::string& graphJson);
 
 protected:
     void ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointName& remoteEndpoint) override;

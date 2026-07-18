@@ -260,6 +260,9 @@ void OrchFaustProcessor::checkAndApplyOscCommands() {
             case CommandType::Status:
                 Logger::logInfo("Status query: Synth compiled = ", voiceManager.isCompiled());
                 break;
+            case CommandType::RequestGraph:
+                if (oscServer) oscServer->sendGraphState(currentGraphJson);
+                break;
         }
     }
 }
